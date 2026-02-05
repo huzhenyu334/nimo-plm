@@ -1,0 +1,2536 @@
+openapi: 3.1.0
+info:
+  title: nimo PLM System API
+  description: |
+    nimo智能眼镜PLM系统API接口规范
+    
+    ## 认证方式
+    所有接口（除/auth/*外）需要在Header中携带JWT Token：
+    ```
+    Authorization: Bearer <token>
+    ```
+    
+    ## 通用响应格式
+    ```json
+    {
+      "code": 0,
+      "message": "success",
+      "data": {...}
+    }
+    ```
+    
+    ## 错误码
+    - 0: 成功
+    - 400xx: 参数错误
+    - 401xx: 认证错误
+    - 403xx: 权限错误
+    - 404xx: 资源不存在
+    - 500xx: 服务器错误
+  version: 1.0.0
+  contact:
+    name: nimo PLM Team
+    email: plm@bitfantasy.com
+
+servers:
+  - url: http://localhost:8001
+    description: 开发环境
+  - url: https://plm-api.nimo.internal
+    description: 生产环境
+
+tags:
+  - name: Auth
+    description: 认证相关接口
+  - name: Users
+    description: 用户管理
+  - name: Products
+    description: 产品管理
+  - name: Materials
+    description: 物料管理
+  - name: BOM
+    description: BOM管理
+  - name: Projects
+    description: 项目管理
+  - name: Tasks
+    description: 任务管理
+  - name: ECN
+    description: 工程变更管理
+  - name: Documents
+    description: 文档管理
+
+paths:
+  # ============================================================
+  # 认证接口
+  # ============================================================
+  /api/v1/auth/feishu/login:
+    get:
+      tags: [Auth]
+      summary: 飞书登录
+      description: 重定向到飞书OAuth授权页面
+      operationId: feishuLogin
+      parameters:
+        - name: redirect_uri
+          in: query
+          description: 授权后回调地址
+          schema:
+            type: string
+      responses:
+        '302':
+          description: 重定向到飞书授权页面
+
+  /api/v1/auth/feishu/callback:
+    get:
+      tags: [Auth]
+      summary: 飞书授权回调
+      description: 飞书授权完成后的回调接口
+      operationId: feishuCallback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: 刷新Token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+              required:
+                - refresh_token
+      responses:
+        '200':
+          description: 刷新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: 退出登录
+      operationId: logout
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 退出成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: 获取当前用户信息
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserDetail'
+
+  # ============================================================
+  # 用户管理接口
+  # ============================================================
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: 获取用户列表
+      operationId: listUsers
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: keyword
+          in: query
+          description: 搜索关键词（姓名/工号/邮箱）
+          schema:
+            type: string
+        - name: department_id
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, locked]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserListResponse'
+
+  /api/v1/users/{id}:
+    get:
+      tags: [Users]
+      summary: 获取用户详情
+      operationId: getUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserDetail'
+
+  # ============================================================
+  # 产品管理接口
+  # ============================================================
+  /api/v1/products:
+    get:
+      tags: [Products]
+      summary: 获取产品列表
+      operationId: listProducts
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: keyword
+          in: query
+          description: 搜索关键词（名称/编码）
+          schema:
+            type: string
+        - name: category_id
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, developing, active, discontinued]
+        - name: created_by
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProductListResponse'
+
+    post:
+      tags: [Products]
+      summary: 创建产品
+      operationId: createProduct
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Product'
+
+  /api/v1/products/{id}:
+    get:
+      tags: [Products]
+      summary: 获取产品详情
+      operationId: getProduct
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProductDetail'
+
+    put:
+      tags: [Products]
+      summary: 更新产品
+      operationId: updateProduct
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProductRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Product'
+
+    delete:
+      tags: [Products]
+      summary: 删除产品
+      operationId: deleteProduct
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/v1/products/{id}/release:
+    post:
+      tags: [Products]
+      summary: 发布产品
+      operationId: releaseProduct
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 发布成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Product'
+
+  /api/v1/product-categories:
+    get:
+      tags: [Products]
+      summary: 获取产品类别列表
+      operationId: listProductCategories
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Category'
+
+  # ============================================================
+  # 物料管理接口
+  # ============================================================
+  /api/v1/materials:
+    get:
+      tags: [Materials]
+      summary: 获取物料列表
+      operationId: listMaterials
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: keyword
+          in: query
+          schema:
+            type: string
+        - name: category_id
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, obsolete]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MaterialListResponse'
+
+    post:
+      tags: [Materials]
+      summary: 创建物料
+      operationId: createMaterial
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMaterialRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Material'
+
+  /api/v1/materials/{id}:
+    get:
+      tags: [Materials]
+      summary: 获取物料详情
+      operationId: getMaterial
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Material'
+
+    put:
+      tags: [Materials]
+      summary: 更新物料
+      operationId: updateMaterial
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMaterialRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Material'
+
+  /api/v1/material-categories:
+    get:
+      tags: [Materials]
+      summary: 获取物料类别列表
+      operationId: listMaterialCategories
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Category'
+
+  # ============================================================
+  # BOM管理接口
+  # ============================================================
+  /api/v1/products/{productId}/bom:
+    get:
+      tags: [BOM]
+      summary: 获取产品BOM
+      operationId: getProductBOM
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: version
+          in: query
+          description: BOM版本号，不填返回最新版本
+          schema:
+            type: string
+        - name: expand_level
+          in: query
+          description: 展开层级，-1表示全部展开
+          schema:
+            type: integer
+            default: -1
+        - name: include_cost
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BOMDetail'
+
+  /api/v1/products/{productId}/bom/versions:
+    get:
+      tags: [BOM]
+      summary: 获取产品BOM版本列表
+      operationId: listBOMVersions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/BOMVersion'
+
+  /api/v1/products/{productId}/bom/items:
+    post:
+      tags: [BOM]
+      summary: 添加BOM行项
+      operationId: addBOMItem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddBOMItemRequest'
+      responses:
+        '201':
+          description: 添加成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BOMItem'
+
+  /api/v1/products/{productId}/bom/items/{itemId}:
+    put:
+      tags: [BOM]
+      summary: 更新BOM行项
+      operationId: updateBOMItem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBOMItemRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BOMItem'
+
+    delete:
+      tags: [BOM]
+      summary: 删除BOM行项
+      operationId: deleteBOMItem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/v1/products/{productId}/bom/release:
+    post:
+      tags: [BOM]
+      summary: 发布BOM版本
+      operationId: releaseBOM
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseBOMRequest'
+      responses:
+        '200':
+          description: 发布成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BOMVersion'
+
+  /api/v1/products/{productId}/bom/compare:
+    get:
+      tags: [BOM]
+      summary: 对比BOM版本
+      operationId: compareBOM
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: version_a
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: version_b
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BOMCompareResult'
+
+  # ============================================================
+  # 项目管理接口
+  # ============================================================
+  /api/v1/projects:
+    get:
+      tags: [Projects]
+      summary: 获取项目列表
+      operationId: listProjects
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: keyword
+          in: query
+          schema:
+            type: string
+        - name: product_id
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [planning, evt, dvt, pvt, mp, completed, cancelled]
+        - name: owner_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProjectListResponse'
+
+    post:
+      tags: [Projects]
+      summary: 创建项目
+      operationId: createProject
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Project'
+
+  /api/v1/projects/{id}:
+    get:
+      tags: [Projects]
+      summary: 获取项目详情
+      operationId: getProject
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProjectDetail'
+
+    put:
+      tags: [Projects]
+      summary: 更新项目
+      operationId: updateProject
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Project'
+
+  /api/v1/projects/{id}/gantt:
+    get:
+      tags: [Projects]
+      summary: 获取项目甘特图数据
+      operationId: getProjectGantt
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GanttData'
+
+  # ============================================================
+  # 任务管理接口
+  # ============================================================
+  /api/v1/projects/{projectId}/tasks:
+    get:
+      tags: [Tasks]
+      summary: 获取项目任务列表
+      operationId: listProjectTasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: phase
+          in: query
+          schema:
+            type: string
+            enum: [evt, dvt, pvt, mp]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, in_progress, completed, blocked, cancelled]
+        - name: assignee_id
+          in: query
+          schema:
+            type: string
+        - name: overdue_only
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Task'
+
+    post:
+      tags: [Tasks]
+      summary: 创建任务
+      operationId: createTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Task'
+
+  /api/v1/tasks/{id}:
+    get:
+      tags: [Tasks]
+      summary: 获取任务详情
+      operationId: getTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TaskDetail'
+
+    put:
+      tags: [Tasks]
+      summary: 更新任务
+      operationId: updateTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Task'
+
+  /api/v1/tasks/my:
+    get:
+      tags: [Tasks]
+      summary: 获取我的任务列表
+      operationId: listMyTasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, in_progress, completed, blocked]
+        - name: overdue_only
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Task'
+
+  # ============================================================
+  # ECN管理接口
+  # ============================================================
+  /api/v1/ecns:
+    get:
+      tags: [ECN]
+      summary: 获取ECN列表
+      operationId: listECNs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: product_id
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, pending, approved, rejected, implemented, cancelled]
+        - name: requested_by
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ECNListResponse'
+
+    post:
+      tags: [ECN]
+      summary: 创建ECN
+      operationId: createECN
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateECNRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ECN'
+
+  /api/v1/ecns/{id}:
+    get:
+      tags: [ECN]
+      summary: 获取ECN详情
+      operationId: getECN
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ECNDetail'
+
+  /api/v1/ecns/{id}/submit:
+    post:
+      tags: [ECN]
+      summary: 提交ECN审批
+      operationId: submitECN
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitECNRequest'
+      responses:
+        '200':
+          description: 提交成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ECN'
+
+  /api/v1/ecns/{id}/approve:
+    post:
+      tags: [ECN]
+      summary: 审批ECN
+      operationId: approveECN
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveECNRequest'
+      responses:
+        '200':
+          description: 审批成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ECN'
+
+  # ============================================================
+  # 文档管理接口
+  # ============================================================
+  /api/v1/documents:
+    get:
+      tags: [Documents]
+      summary: 获取文档列表
+      operationId: listDocuments
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: keyword
+          in: query
+          schema:
+            type: string
+        - name: category_id
+          in: query
+          schema:
+            type: string
+        - name: related_type
+          in: query
+          schema:
+            type: string
+            enum: [product, project, ecn, material]
+        - name: related_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DocumentListResponse'
+
+    post:
+      tags: [Documents]
+      summary: 上传文档
+      operationId: uploadDocument
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                title:
+                  type: string
+                category_id:
+                  type: string
+                related_type:
+                  type: string
+                related_id:
+                  type: string
+                description:
+                  type: string
+              required:
+                - file
+                - title
+      responses:
+        '201':
+          description: 上传成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Document'
+
+  /api/v1/documents/{id}:
+    get:
+      tags: [Documents]
+      summary: 获取文档详情
+      operationId: getDocument
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DocumentDetail'
+
+    delete:
+      tags: [Documents]
+      summary: 删除文档
+      operationId: deleteDocument
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/v1/documents/{id}/download:
+    get:
+      tags: [Documents]
+      summary: 下载文档
+      operationId: downloadDocument
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 文件内容
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+# ============================================================
+# 组件定义
+# ============================================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      description: 页码
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+
+    PageSizeParam:
+      name: page_size
+      in: query
+      description: 每页数量
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+
+  schemas:
+    # ============================================================
+    # 通用响应
+    # ============================================================
+    BaseResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 0
+        message:
+          type: string
+          example: success
+
+    SuccessResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              nullable: true
+
+    PaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+
+    # ============================================================
+    # 认证相关
+    # ============================================================
+    LoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                access_token:
+                  type: string
+                refresh_token:
+                  type: string
+                expires_in:
+                  type: integer
+                  description: Token过期时间（秒）
+                user:
+                  $ref: '#/components/schemas/UserDetail'
+
+    # ============================================================
+    # 用户相关
+    # ============================================================
+    UserSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        avatar_url:
+          type: string
+
+    UserDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        mobile:
+          type: string
+        avatar_url:
+          type: string
+        department:
+          $ref: '#/components/schemas/Department'
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+        permissions:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    UserListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserDetail'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    Department:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+
+    Role:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+
+    # ============================================================
+    # 产品相关
+    # ============================================================
+    Category:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        parent_id:
+          type: string
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        category:
+          $ref: '#/components/schemas/Category'
+        status:
+          type: string
+          enum: [draft, developing, active, discontinued]
+        current_bom_version:
+          type: string
+        thumbnail_url:
+          type: string
+        created_by:
+          $ref: '#/components/schemas/UserSummary'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ProductDetail:
+      allOf:
+        - $ref: '#/components/schemas/Product'
+        - type: object
+          properties:
+            description:
+              type: string
+            specs:
+              type: object
+            current_bom:
+              $ref: '#/components/schemas/BOMSummary'
+            projects:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProjectSummary'
+            documents:
+              type: array
+              items:
+                $ref: '#/components/schemas/DocumentSummary'
+
+    ProductListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    CreateProductRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        category_id:
+          type: string
+        description:
+          type: string
+        specs:
+          type: object
+        base_product_id:
+          type: string
+          description: 基于哪个产品创建（会复制BOM）
+      required:
+        - name
+        - category_id
+
+    UpdateProductRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        specs:
+          type: object
+        thumbnail_url:
+          type: string
+
+    # ============================================================
+    # 物料相关
+    # ============================================================
+    Material:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        category:
+          $ref: '#/components/schemas/Category'
+        status:
+          type: string
+        unit:
+          type: string
+        description:
+          type: string
+        specs:
+          type: object
+        standard_cost:
+          type: number
+        lead_time_days:
+          type: integer
+        safety_stock:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+
+    MaterialListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Material'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    CreateMaterialRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        category_id:
+          type: string
+        unit:
+          type: string
+          enum: [pcs, kg, m, set]
+        description:
+          type: string
+        specs:
+          type: object
+        standard_cost:
+          type: number
+        lead_time_days:
+          type: integer
+        safety_stock:
+          type: number
+      required:
+        - name
+        - category_id
+        - unit
+
+    UpdateMaterialRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        specs:
+          type: object
+        standard_cost:
+          type: number
+        lead_time_days:
+          type: integer
+        safety_stock:
+          type: number
+
+    # ============================================================
+    # BOM相关
+    # ============================================================
+    BOMSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+        total_items:
+          type: integer
+        total_cost:
+          type: number
+
+    BOMVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+          enum: [draft, released, obsolete]
+        total_items:
+          type: integer
+        total_cost:
+          type: number
+        released_by:
+          $ref: '#/components/schemas/UserSummary'
+        released_at:
+          type: string
+          format: date-time
+        release_notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    BOMDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        product_id:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+        total_items:
+          type: integer
+        total_cost:
+          type: number
+        max_level:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BOMItem'
+
+    BOMItem:
+      type: object
+      properties:
+        id:
+          type: string
+        parent_item_id:
+          type: string
+        material:
+          $ref: '#/components/schemas/Material'
+        level:
+          type: integer
+        sequence:
+          type: integer
+        quantity:
+          type: number
+        unit:
+          type: string
+        position:
+          type: string
+        unit_cost:
+          type: number
+        extended_cost:
+          type: number
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/BOMItem'
+
+    AddBOMItemRequest:
+      type: object
+      properties:
+        parent_item_id:
+          type: string
+        material_id:
+          type: string
+        quantity:
+          type: number
+          minimum: 0.001
+        unit:
+          type: string
+        position:
+          type: string
+        notes:
+          type: string
+      required:
+        - material_id
+        - quantity
+
+    UpdateBOMItemRequest:
+      type: object
+      properties:
+        quantity:
+          type: number
+        position:
+          type: string
+        notes:
+          type: string
+
+    ReleaseBOMRequest:
+      type: object
+      properties:
+        version:
+          type: string
+          description: 版本号
+        release_notes:
+          type: string
+      required:
+        - version
+
+    BOMCompareResult:
+      type: object
+      properties:
+        version_a:
+          type: string
+        version_b:
+          type: string
+        added:
+          type: array
+          items:
+            $ref: '#/components/schemas/BOMItem'
+        removed:
+          type: array
+          items:
+            $ref: '#/components/schemas/BOMItem'
+        modified:
+          type: array
+          items:
+            type: object
+            properties:
+              item_id:
+                type: string
+              material:
+                $ref: '#/components/schemas/Material'
+              before:
+                type: object
+              after:
+                type: object
+
+    # ============================================================
+    # 项目相关
+    # ============================================================
+    ProjectSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        current_phase:
+          type: string
+        progress:
+          type: integer
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        product:
+          $ref: '#/components/schemas/Product'
+        status:
+          type: string
+          enum: [planning, evt, dvt, pvt, mp, completed, cancelled]
+        current_phase:
+          type: string
+        progress:
+          type: integer
+        owner:
+          $ref: '#/components/schemas/UserSummary'
+        planned_start:
+          type: string
+          format: date
+        planned_end:
+          type: string
+          format: date
+        created_at:
+          type: string
+          format: date-time
+
+    ProjectDetail:
+      allOf:
+        - $ref: '#/components/schemas/Project'
+        - type: object
+          properties:
+            description:
+              type: string
+            phases:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProjectPhase'
+            task_summary:
+              type: object
+              properties:
+                total:
+                  type: integer
+                completed:
+                  type: integer
+                in_progress:
+                  type: integer
+                pending:
+                  type: integer
+                blocked:
+                  type: integer
+
+    ProjectPhase:
+      type: object
+      properties:
+        id:
+          type: string
+        phase:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        planned_start:
+          type: string
+          format: date
+        planned_end:
+          type: string
+          format: date
+        actual_start:
+          type: string
+          format: date
+        actual_end:
+          type: string
+          format: date
+
+    ProjectListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    CreateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        product_id:
+          type: string
+        description:
+          type: string
+        template:
+          type: string
+          enum: [standard, fast_track, custom]
+          default: standard
+        owner_id:
+          type: string
+        planned_start:
+          type: string
+          format: date
+        planned_end:
+          type: string
+          format: date
+      required:
+        - name
+        - product_id
+
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        owner_id:
+          type: string
+        planned_start:
+          type: string
+          format: date
+        planned_end:
+          type: string
+          format: date
+
+    GanttData:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              start:
+                type: string
+                format: date
+              end:
+                type: string
+                format: date
+              progress:
+                type: number
+              parent:
+                type: string
+              dependencies:
+                type: array
+                items:
+                  type: string
+
+    # ============================================================
+    # 任务相关
+    # ============================================================
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        project:
+          $ref: '#/components/schemas/ProjectSummary'
+        phase:
+          type: string
+        task_type:
+          type: string
+          enum: [task, milestone, deliverable]
+        status:
+          type: string
+          enum: [pending, in_progress, completed, blocked, cancelled]
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        assignee:
+          $ref: '#/components/schemas/UserSummary'
+        progress:
+          type: integer
+        planned_start:
+          type: string
+          format: date
+        planned_end:
+          type: string
+          format: date
+        due_date:
+          type: string
+          format: date
+        is_overdue:
+          type: boolean
+
+    TaskDetail:
+      allOf:
+        - $ref: '#/components/schemas/Task'
+        - type: object
+          properties:
+            description:
+              type: string
+            reviewer:
+              $ref: '#/components/schemas/UserSummary'
+            actual_start:
+              type: string
+              format: date
+            actual_end:
+              type: string
+              format: date
+            estimated_hours:
+              type: number
+            actual_hours:
+              type: number
+            parent_task:
+              $ref: '#/components/schemas/Task'
+            subtasks:
+              type: array
+              items:
+                $ref: '#/components/schemas/Task'
+            dependencies:
+              type: array
+              items:
+                $ref: '#/components/schemas/Task'
+            comments:
+              type: array
+              items:
+                $ref: '#/components/schemas/TaskComment'
+            attachments:
+              type: array
+              items:
+                $ref: '#/components/schemas/Attachment'
+
+    TaskComment:
+      type: object
+      properties:
+        id:
+          type: string
+        user:
+          $ref: '#/components/schemas/UserSummary'
+        content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CreateTaskRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        phase_id:
+          type: string
+        parent_task_id:
+          type: string
+        description:
+          type: string
+        task_type:
+          type: string
+          enum: [task, milestone, deliverable]
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        assignee_id:
+          type: string
+        reviewer_id:
+          type: string
+        planned_start:
+          type: string
+          format: date
+        planned_end:
+          type: string
+          format: date
+        estimated_hours:
+          type: number
+      required:
+        - name
+
+    UpdateTaskRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+        assignee_id:
+          type: string
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        planned_start:
+          type: string
+          format: date
+        planned_end:
+          type: string
+          format: date
+        actual_hours:
+          type: number
+
+    # ============================================================
+    # ECN相关
+    # ============================================================
+    ECN:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        title:
+          type: string
+        product:
+          $ref: '#/components/schemas/Product'
+        change_type:
+          type: string
+          enum: [design, material, process, document]
+        urgency:
+          type: string
+          enum: [low, medium, high, critical]
+        status:
+          type: string
+          enum: [draft, pending, approved, rejected, implemented, cancelled]
+        requested_by:
+          $ref: '#/components/schemas/UserSummary'
+        requested_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    ECNDetail:
+      allOf:
+        - $ref: '#/components/schemas/ECN'
+        - type: object
+          properties:
+            reason:
+              type: string
+            description:
+              type: string
+            impact_analysis:
+              type: string
+            affected_items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ECNAffectedItem'
+            approvals:
+              type: array
+              items:
+                $ref: '#/components/schemas/ECNApproval'
+            approved_by:
+              $ref: '#/components/schemas/UserSummary'
+            approved_at:
+              type: string
+              format: date-time
+
+    ECNAffectedItem:
+      type: object
+      properties:
+        id:
+          type: string
+        item_type:
+          type: string
+        item_id:
+          type: string
+        item_name:
+          type: string
+        before_value:
+          type: object
+        after_value:
+          type: object
+        change_description:
+          type: string
+
+    ECNApproval:
+      type: object
+      properties:
+        id:
+          type: string
+        approver:
+          $ref: '#/components/schemas/UserSummary'
+        sequence:
+          type: integer
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        comment:
+          type: string
+        decided_at:
+          type: string
+          format: date-time
+
+    ECNListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ECN'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    CreateECNRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        product_id:
+          type: string
+        change_type:
+          type: string
+          enum: [design, material, process, document]
+        urgency:
+          type: string
+          enum: [low, medium, high, critical]
+        reason:
+          type: string
+        description:
+          type: string
+        impact_analysis:
+          type: string
+        affected_items:
+          type: array
+          items:
+            type: object
+            properties:
+              item_type:
+                type: string
+              item_id:
+                type: string
+              change_description:
+                type: string
+      required:
+        - title
+        - product_id
+        - change_type
+        - reason
+
+    SubmitECNRequest:
+      type: object
+      properties:
+        approver_ids:
+          type: array
+          items:
+            type: string
+          description: 审批人ID列表（按顺序）
+      required:
+        - approver_ids
+
+    ApproveECNRequest:
+      type: object
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        comment:
+          type: string
+      required:
+        - decision
+
+    # ============================================================
+    # 文档相关
+    # ============================================================
+    DocumentSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        title:
+          type: string
+        version:
+          type: string
+
+    Document:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        title:
+          type: string
+        category:
+          $ref: '#/components/schemas/Category'
+        status:
+          type: string
+        version:
+          type: string
+        file_name:
+          type: string
+        file_size:
+          type: integer
+        mime_type:
+          type: string
+        uploaded_by:
+          $ref: '#/components/schemas/UserSummary'
+        created_at:
+          type: string
+          format: date-time
+
+    DocumentDetail:
+      allOf:
+        - $ref: '#/components/schemas/Document'
+        - type: object
+          properties:
+            description:
+              type: string
+            related_type:
+              type: string
+            related_id:
+              type: string
+            feishu_doc_url:
+              type: string
+            versions:
+              type: array
+              items:
+                $ref: '#/components/schemas/DocumentVersion'
+
+    DocumentVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+        file_name:
+          type: string
+        file_size:
+          type: integer
+        change_summary:
+          type: string
+        created_by:
+          $ref: '#/components/schemas/UserSummary'
+        created_at:
+          type: string
+          format: date-time
+
+    DocumentListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Document'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: string
+        file_name:
+          type: string
+        file_size:
+          type: integer
+        mime_type:
+          type: string
+        uploaded_by:
+          $ref: '#/components/schemas/UserSummary'
+        created_at:
+          type: string
+          format: date-time
+
+security:
+  - bearerAuth: []
