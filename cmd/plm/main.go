@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -10,10 +11,11 @@ import (
 	"syscall"
 
 	"github.com/bitfantasy/nimo/internal/config"
-	"github.com/bitfantasy/nimo/internal/plm/handler"
 	"github.com/bitfantasy/nimo/internal/middleware"
+	"github.com/bitfantasy/nimo/internal/plm/handler"
 	"github.com/bitfantasy/nimo/internal/plm/repository"
 	"github.com/bitfantasy/nimo/internal/plm/service"
+	"github.com/bitfantasy/nimo/internal/shared/feishu"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
@@ -275,6 +277,13 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 			auth.POST("/refresh", h.Auth.RefreshToken)
 		}
 
+		// Webhook路由（无需认证，飞书回调使用）
+		webhooks := v1.Group("/webhooks")
+		{
+			webhooks.POST("/feishu/approval", handleFeishuApprovalWebhook)
+			webhooks.POST("/feishu/event", handleFeishuEventVerification)
+		}
+
 		// 需要认证的接口
 		authorized := v1.Group("")
 		authorized.Use(middleware.JWTAuth(cfg.JWT.Secret))
@@ -438,4 +447,77 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 			authorized.POST("/projects/create-from-template", h.Template.CreateProjectFromTemplate)
 		}
 	}
+}
+
+// =============================================================================
+// 飞书Webhook处理函数
+// 暂时只做日志记录，真正的业务处理在Phase 3实现
+// =============================================================================
+
+// handleFeishuApprovalWebhook 处理飞书审批回调事件
+func handleFeishuApprovalWebhook(c *gin.Context) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		log.Printf("[Feishu Webhook] 读取请求体失败: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "读取请求体失败"})
+		return
+	}
+
+	// 检查是否为URL验证事件
+	if feishu.IsVerificationEvent(body) {
+		challenge, err := feishu.HandleVerification(body)
+		if err != nil {
+			log.Printf("[Feishu Webhook] URL验证失败: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "URL验证失败"})
+			return
+		}
+		log.Printf("[Feishu Webhook] URL验证成功")
+		c.JSON(http.StatusOK, gin.H{"challenge": challenge})
+		return
+	}
+
+	// 解析审批事件
+	event, err := feishu.HandleApprovalEvent(body)
+	if err != nil {
+		log.Printf("[Feishu Webhook] 解析审批事件失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"code": 0}) // 返回成功避免飞书重试
+		return
+	}
+
+	// 记录审批事件日志（Phase 3 将在此处实现业务处理）
+	log.Printf("[Feishu Webhook] 审批事件: approval_code=%s, instance_code=%s, status=%s, open_id=%s",
+		event.ApprovalCode, event.InstanceCode, event.Status, event.OpenID)
+
+	c.JSON(http.StatusOK, gin.H{"code": 0})
+}
+
+// handleFeishuEventVerification 处理飞书事件订阅URL验证
+func handleFeishuEventVerification(c *gin.Context) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		log.Printf("[Feishu Webhook] 读取请求体失败: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "读取请求体失败"})
+		return
+	}
+
+	// 获取事件类型
+	eventType := feishu.GetEventType(body)
+	log.Printf("[Feishu Webhook] 收到事件: type=%s", eventType)
+
+	// 处理URL验证
+	if feishu.IsVerificationEvent(body) {
+		challenge, err := feishu.HandleVerification(body)
+		if err != nil {
+			log.Printf("[Feishu Webhook] URL验证失败: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "URL验证失败"})
+			return
+		}
+		log.Printf("[Feishu Webhook] URL验证成功, challenge=%s", challenge)
+		c.JSON(http.StatusOK, gin.H{"challenge": challenge})
+		return
+	}
+
+	// 其他事件暂时只记录日志（Phase 3 将在此处扩展）
+	log.Printf("[Feishu Webhook] 收到未处理的事件: %s, body=%s", eventType, string(body))
+	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
