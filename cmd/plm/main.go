@@ -225,6 +225,15 @@ func main() {
 		`ALTER TABLE approval_definitions ALTER COLUMN approval_type DROP NOT NULL`,
 		`ALTER TABLE approval_definitions ALTER COLUMN approval_type SET DEFAULT ''`,
 		`ALTER TABLE approval_definitions DROP CONSTRAINT IF EXISTS approval_definitions_approval_type_check`,
+		`CREATE TABLE IF NOT EXISTS template_task_dependencies (
+			id VARCHAR(36) PRIMARY KEY,
+			template_id VARCHAR(36) NOT NULL,
+			task_code VARCHAR(50) NOT NULL,
+			depends_on_task_code VARCHAR(50) NOT NULL,
+			dependency_type VARCHAR(10) DEFAULT 'FS',
+			lag_days INT DEFAULT 0
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ttd_template ON template_task_dependencies(template_id)`,
 		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS description TEXT`,
 		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS icon VARCHAR(50) DEFAULT 'approval'`,
 		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS group_name VARCHAR(50) NOT NULL DEFAULT '其他'`,

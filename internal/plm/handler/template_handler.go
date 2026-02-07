@@ -243,20 +243,21 @@ func (h *TemplateHandler) Duplicate(c *gin.Context) {
 
 // CreateTemplateTaskRequest 创建模板任务请求
 type CreateTemplateTaskRequest struct {
-	TaskCode             string `json:"task_code" binding:"required"`
-	Name                 string `json:"name" binding:"required"`
-	Description          string `json:"description"`
-	Phase                string `json:"phase" binding:"required"`
-	ParentTaskCode       string `json:"parent_task_code"`
-	TaskType             string `json:"task_type"`
-	DefaultAssigneeRole  string `json:"default_assignee_role"`
-	EstimatedDays        int    `json:"estimated_days"`
-	IsCritical           bool   `json:"is_critical"`
-	RequiresApproval     bool   `json:"requires_approval"`
-	ApprovalType         string `json:"approval_type"`
-	AutoCreateFeishuTask bool   `json:"auto_create_feishu_task"`
-	FeishuApprovalCode   string `json:"feishu_approval_code"`
-	SortOrder            int    `json:"sort_order"`
+	TaskCode             string   `json:"task_code" binding:"required"`
+	Name                 string   `json:"name" binding:"required"`
+	Description          string   `json:"description"`
+	Phase                string   `json:"phase" binding:"required"`
+	ParentTaskCode       string   `json:"parent_task_code"`
+	TaskType             string   `json:"task_type"`
+	DefaultAssigneeRole  string   `json:"default_assignee_role"`
+	EstimatedDays        int      `json:"estimated_days"`
+	IsCritical           bool     `json:"is_critical"`
+	RequiresApproval     bool     `json:"requires_approval"`
+	ApprovalType         string   `json:"approval_type"`
+	AutoCreateFeishuTask bool     `json:"auto_create_feishu_task"`
+	FeishuApprovalCode   string   `json:"feishu_approval_code"`
+	SortOrder            int      `json:"sort_order"`
+	DependsOn            []string `json:"depends_on"` // 前置任务 task_code 列表
 }
 
 // CreateTask 创建模板任务
@@ -467,8 +468,23 @@ func (h *TemplateHandler) BatchSaveTasks(c *gin.Context) {
 		tasks = append(tasks, task)
 	}
 
+	// 构建依赖关系
+	var dependencies []entity.TemplateTaskDependency
+	for _, t := range req.Tasks {
+		for _, depCode := range t.DependsOn {
+			dependencies = append(dependencies, entity.TemplateTaskDependency{
+				ID:                uuid.New().String(),
+				TemplateID:        templateID,
+				TaskCode:          t.TaskCode,
+				DependsOnTaskCode: depCode,
+				DependencyType:    "FS",
+				LagDays:           0,
+			})
+		}
+	}
+
 	// 批量保存
-	if err := h.svc.BatchSaveTasks(c.Request.Context(), templateID, tasks); err != nil {
+	if err := h.svc.BatchSaveTasks(c.Request.Context(), templateID, tasks, dependencies); err != nil {
 		InternalError(c, "Failed to save tasks: "+err.Error())
 		return
 	}

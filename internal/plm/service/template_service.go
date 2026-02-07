@@ -34,7 +34,21 @@ func (s *TemplateService) ListTemplates(ctx context.Context, templateType, produ
 
 // GetTemplate 获取模板详情
 func (s *TemplateService) GetTemplate(ctx context.Context, id string) (*entity.ProjectTemplate, error) {
-	return s.templateRepo.GetWithTasks(ctx, id)
+	tmpl, err := s.templateRepo.GetWithTasks(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// 将模板级别的 Dependencies 分配到每个任务的 Dependencies 字段（gorm:"-"）
+	depMap := make(map[string][]entity.TemplateTaskDependency)
+	for _, d := range tmpl.Dependencies {
+		depMap[d.TaskCode] = append(depMap[d.TaskCode], d)
+	}
+	for i := range tmpl.Tasks {
+		tmpl.Tasks[i].Dependencies = depMap[tmpl.Tasks[i].TaskCode]
+	}
+
+	return tmpl, nil
 }
 
 // CreateTemplate 创建模板
@@ -155,14 +169,19 @@ func (s *TemplateService) DeleteTemplateTask(ctx context.Context, templateID, ta
 	return s.templateRepo.DeleteTask(ctx, templateID, taskCode)
 }
 
-// BatchSaveTasks 批量保存任务（清空旧任务并插入新任务）
-func (s *TemplateService) BatchSaveTasks(ctx context.Context, templateID string, tasks []entity.TemplateTask) error {
+// BatchSaveTasks 批量保存任务和依赖（清空旧数据并插入新数据）
+func (s *TemplateService) BatchSaveTasks(ctx context.Context, templateID string, tasks []entity.TemplateTask, dependencies []entity.TemplateTaskDependency) error {
 	db := s.templateRepo.DB()
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		// 用原始SQL硬删除旧任务（避免GORM软删除干扰）
 		if err := tx.Exec("DELETE FROM template_tasks WHERE template_id = ?", templateID).Error; err != nil {
 			return fmt.Errorf("delete old tasks: %w", err)
+		}
+
+		// 删除旧依赖
+		if err := tx.Exec("DELETE FROM template_task_dependencies WHERE template_id = ?", templateID).Error; err != nil {
+			return fmt.Errorf("delete old dependencies: %w", err)
 		}
 
 		// 批量插入新任务
@@ -174,6 +193,13 @@ func (s *TemplateService) BatchSaveTasks(ctx context.Context, templateID string,
 			}
 			if err := tx.Create(&tasks).Error; err != nil {
 				return fmt.Errorf("create tasks: %w", err)
+			}
+		}
+
+		// 批量插入新依赖
+		if len(dependencies) > 0 {
+			if err := tx.Create(&dependencies).Error; err != nil {
+				return fmt.Errorf("create dependencies: %w", err)
 			}
 		}
 
@@ -228,10 +254,33 @@ func (s *TemplateService) CreateNewVersion(ctx context.Context, source *entity.P
 				newTask.TemplateID = newID
 				newTask.CreatedAt = now
 				newTask.UpdatedAt = now
+				newTask.Dependencies = nil // gorm:"-" 字段清除，避免干扰
 				newTasks = append(newTasks, newTask)
 			}
 			if err := tx.Create(&newTasks).Error; err != nil {
 				return fmt.Errorf("copy tasks: %w", err)
+			}
+		}
+
+		// 复制依赖关系
+		var sourceDeps []entity.TemplateTaskDependency
+		if err := tx.Where("template_id = ?", source.ID).Find(&sourceDeps).Error; err != nil {
+			return fmt.Errorf("load source deps: %w", err)
+		}
+		if len(sourceDeps) > 0 {
+			var newDeps []entity.TemplateTaskDependency
+			for _, d := range sourceDeps {
+				newDeps = append(newDeps, entity.TemplateTaskDependency{
+					ID:                uuid.New().String(),
+					TemplateID:        newID,
+					TaskCode:          d.TaskCode,
+					DependsOnTaskCode: d.DependsOnTaskCode,
+					DependencyType:    d.DependencyType,
+					LagDays:           d.LagDays,
+				})
+			}
+			if err := tx.Create(&newDeps).Error; err != nil {
+				return fmt.Errorf("copy dependencies: %w", err)
 			}
 		}
 
