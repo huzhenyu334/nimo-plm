@@ -97,22 +97,7 @@ func (FeishuTaskSync) TableName() string {
 	return "feishu_task_sync"
 }
 
-// ApprovalDefinition 审批定义
-type ApprovalDefinition struct {
-	ID                 string          `json:"id" gorm:"primaryKey;size:36"`
-	Code               string          `json:"code" gorm:"uniqueIndex;size:50;not null"`
-	Name               string          `json:"name" gorm:"size:200;not null"`
-	FeishuApprovalCode string          `json:"feishu_approval_code" gorm:"size:100"`
-	ApprovalType       string          `json:"approval_type" gorm:"size:20;not null"` // BOM/ECN/TASK/PHASE/DOCUMENT
-	FormDefinition     json.RawMessage `json:"form_definition" gorm:"type:jsonb"`
-	IsActive           bool            `json:"is_active" gorm:"default:true"`
-	CreatedAt          time.Time       `json:"created_at"`
-	UpdatedAt          time.Time       `json:"updated_at"`
-}
-
-func (ApprovalDefinition) TableName() string {
-	return "approval_definitions"
-}
+// NOTE: ApprovalDefinition 已移动到 approval_definition.go
 
 // ApprovalInstance 审批实例
 type ApprovalInstance struct {

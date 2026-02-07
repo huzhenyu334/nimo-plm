@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -98,16 +99,13 @@ func (s *ApprovalService) CreateApproval(ctx context.Context, req CreateApproval
 	return approval, nil
 }
 
-// Approve 审批通过
+// Approve 审批通过（支持多级审批）
 func (s *ApprovalService) Approve(ctx context.Context, approvalID, reviewerUserID, comment string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 查找审批人记录
 		var reviewer entity.ApprovalReviewer
-		if err := tx.Where("approval_id = ? AND user_id = ?", approvalID, reviewerUserID).First(&reviewer).Error; err != nil {
-			return fmt.Errorf("未找到审批人记录: %w", err)
-		}
-		if reviewer.Status != entity.PLMApprovalStatusPending {
-			return fmt.Errorf("该审批人已处理（当前状态: %s）", reviewer.Status)
+		if err := tx.Where("approval_id = ? AND user_id = ? AND status = ?", approvalID, reviewerUserID, entity.PLMApprovalStatusPending).First(&reviewer).Error; err != nil {
+			return fmt.Errorf("未找到待审批记录: %w", err)
 		}
 
 		// 更新审批人状态
@@ -119,43 +117,111 @@ func (s *ApprovalService) Approve(ctx context.Context, approvalID, reviewerUserI
 			return fmt.Errorf("更新审批人状态失败: %w", err)
 		}
 
-		// 检查是否所有审批人都已通过
+		// 获取审批请求
+		var approval entity.ApprovalRequest
+		if err := tx.Where("id = ?", approvalID).First(&approval).Error; err != nil {
+			return fmt.Errorf("审批请求不存在: %w", err)
+		}
+
+		// 检查当前节点的所有审批人是否都已通过
+		currentNode := approval.CurrentNode
 		var pendingCount int64
 		tx.Model(&entity.ApprovalReviewer{}).
-			Where("approval_id = ? AND status = ?", approvalID, entity.PLMApprovalStatusPending).
+			Where("approval_id = ? AND node_index = ? AND status = ?", approvalID, currentNode, entity.PLMApprovalStatusPending).
 			Count(&pendingCount)
 
-		if pendingCount == 0 {
-			// 所有审批人都已通过 → 审批通过
-			if err := tx.Model(&entity.ApprovalRequest{}).
-				Where("id = ?", approvalID).
-				Updates(map[string]interface{}{
-					"status":     entity.PLMApprovalStatusApproved,
-					"result":     entity.PLMApprovalStatusApproved,
-					"updated_at": now,
-				}).Error; err != nil {
-				return fmt.Errorf("更新审批状态失败: %w", err)
-			}
+		if pendingCount > 0 {
+			// 当前节点还有人未审批
+			return nil
+		}
 
-			// 获取审批请求（用于更新关联任务）
-			var approval entity.ApprovalRequest
-			if err := tx.Where("id = ?", approvalID).First(&approval).Error; err == nil {
-				// 更新关联任务状态: reviewing → completed
-				completedAt := time.Now()
-				tx.Model(&entity.Task{}).
-					Where("id = ? AND status = ?", approval.TaskID, entity.TaskStatusReviewing).
-					Updates(map[string]interface{}{
-						"status":      entity.TaskStatusCompleted,
-						"actual_end":  completedAt,
-						"progress":    100,
-						"updated_at":  completedAt,
-					})
+		// 当前节点所有人都已通过，检查是否有下一个审批节点
+		if approval.FlowSnapshot != nil && len(approval.FlowSnapshot) > 0 {
+			var flowSchema entity.FlowSchema
+			if err := json.Unmarshal(approval.FlowSnapshot, &flowSchema); err == nil {
+				// 找下一个 approve 节点
+				nextApproveIndex := -1
+				for i := currentNode + 1; i < len(flowSchema.Nodes); i++ {
+					if flowSchema.Nodes[i].Type == "approve" {
+						nextApproveIndex = i
+						break
+					}
+				}
 
-				// 发通知给发起人
-				if s.feishuClient != nil {
-					go s.notifyRequester(context.Background(), &approval, "approved", comment)
+				if nextApproveIndex != -1 {
+					// 存在下一个审批节点，激活它
+					nextNode := flowSchema.Nodes[nextApproveIndex]
+					approverIDs := nextNode.Config.ApproverIDs
+					if len(approverIDs) == 0 && nextNode.Config.ApproverType == "submitter" {
+						approverIDs = []string{approval.RequestedBy}
+					}
+
+					if len(approverIDs) > 0 {
+						// 创建下一节点的审批人记录
+						for i, uid := range approverIDs {
+							nextReviewer := entity.ApprovalReviewer{
+								ID:         uuid.New().String(),
+								ApprovalID: approvalID,
+								UserID:     uid,
+								Status:     entity.PLMApprovalStatusPending,
+								Sequence:   i,
+								NodeIndex:  nextApproveIndex,
+								NodeName:   nextNode.Name,
+								ReviewType: "approve",
+							}
+							if err := tx.Create(&nextReviewer).Error; err != nil {
+								return fmt.Errorf("创建下一节点审批人失败: %w", err)
+							}
+
+							// 异步通知
+							if s.feishuClient != nil {
+								go s.notifyReviewer(context.Background(), &approval, uid)
+							}
+						}
+
+						// 更新 current_node
+						if err := tx.Model(&entity.ApprovalRequest{}).
+							Where("id = ?", approvalID).
+							Updates(map[string]interface{}{
+								"current_node": nextApproveIndex,
+								"updated_at":   now,
+							}).Error; err != nil {
+							return fmt.Errorf("更新当前节点失败: %w", err)
+						}
+
+						return nil // 还没结束，等下一个节点
+					}
 				}
 			}
+		}
+
+		// 没有下一个审批节点，或者是旧的审批（无 flow_snapshot），整体通过
+		if err := tx.Model(&entity.ApprovalRequest{}).
+			Where("id = ?", approvalID).
+			Updates(map[string]interface{}{
+				"status":     entity.PLMApprovalStatusApproved,
+				"result":     entity.PLMApprovalStatusApproved,
+				"updated_at": now,
+			}).Error; err != nil {
+			return fmt.Errorf("更新审批状态失败: %w", err)
+		}
+
+		// 更新关联任务状态: reviewing → completed（如果有关联任务）
+		if approval.TaskID != "" {
+			completedAt := time.Now()
+			tx.Model(&entity.Task{}).
+				Where("id = ? AND status = ?", approval.TaskID, entity.TaskStatusReviewing).
+				Updates(map[string]interface{}{
+					"status":     entity.TaskStatusCompleted,
+					"actual_end": completedAt,
+					"progress":   100,
+					"updated_at": completedAt,
+				})
+		}
+
+		// 发通知给发起人
+		if s.feishuClient != nil {
+			go s.notifyRequester(context.Background(), &approval, "approved", comment)
 		}
 
 		return nil

@@ -28,8 +28,10 @@ type Handlers struct {
 	// V3 工作流
 	Workflow    *WorkflowHandler
 	// V4 审批 + 管理
-	Admin      *AdminHandler
-	Approval   *ApprovalHandler
+	Admin       *AdminHandler
+	Approval    *ApprovalHandler
+	// V5 审批定义
+	ApprovalDef *ApprovalDefinitionHandler
 }
 
 // NewHandlers 创建处理器集合

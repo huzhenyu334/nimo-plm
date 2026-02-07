@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -24,9 +25,13 @@ type ApprovalRequest struct {
 	FormData      JSONB      `json:"form_data" gorm:"type:jsonb"`
 	Result        string     `json:"result" gorm:"size:20"`
 	ResultComment string     `json:"result_comment" gorm:"type:text"`
-	RequestedBy   string     `json:"requested_by" gorm:"size:32;not null"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	RequestedBy   string          `json:"requested_by" gorm:"size:32;not null"`
+	DefinitionID  string          `json:"definition_id" gorm:"size:36"`
+	Code          string          `json:"code" gorm:"size:50"`
+	CurrentNode   int             `json:"current_node" gorm:"default:0"`
+	FlowSnapshot  json.RawMessage `json:"flow_snapshot" gorm:"type:jsonb"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
 
 	// 关联
 	Reviewers []ApprovalReviewer `json:"reviewers,omitempty" gorm:"foreignKey:ApprovalID"`
@@ -47,7 +52,10 @@ type ApprovalReviewer struct {
 	Status     string     `json:"status" gorm:"size:20;not null;default:'pending'"`
 	Comment    string     `json:"comment" gorm:"type:text"`
 	DecidedAt  *time.Time `json:"decided_at"`
-	Sequence   int        `json:"sequence" gorm:"default:0"`
+	Sequence   int    `json:"sequence" gorm:"default:0"`
+	NodeIndex  int    `json:"node_index" gorm:"default:0"`
+	NodeName   string `json:"node_name" gorm:"size:100"`
+	ReviewType string `json:"review_type" gorm:"size:20;default:'approve'"`
 
 	// 关联
 	User *User `json:"user,omitempty" gorm:"foreignKey:UserID"`

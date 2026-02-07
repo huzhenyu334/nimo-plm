@@ -196,6 +196,61 @@ func main() {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_approval_reviewers_approval ON approval_reviewers(approval_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_approval_reviewers_user ON approval_reviewers(user_id)`,
+
+		// V5: 审批定义（模板管理）
+		`CREATE TABLE IF NOT EXISTS approval_definitions (
+			id VARCHAR(36) PRIMARY KEY,
+			code VARCHAR(50) NOT NULL UNIQUE,
+			name VARCHAR(200) NOT NULL,
+			description TEXT,
+			icon VARCHAR(50) DEFAULT 'approval',
+			group_name VARCHAR(50) NOT NULL DEFAULT '其他',
+			form_schema JSONB NOT NULL DEFAULT '[]',
+			flow_schema JSONB NOT NULL DEFAULT '{"nodes":[]}',
+			visibility VARCHAR(200) DEFAULT '全员',
+			status VARCHAR(20) NOT NULL DEFAULT 'draft',
+			admin_user_id VARCHAR(32),
+			sort_order INT DEFAULT 0,
+			created_by VARCHAR(32) NOT NULL,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS approval_groups (
+			id VARCHAR(36) PRIMARY KEY,
+			name VARCHAR(50) NOT NULL UNIQUE,
+			sort_order INT DEFAULT 0,
+			created_at TIMESTAMP DEFAULT NOW()
+		)`,
+		// Alter existing approval_definitions table to add new columns & fix old constraints
+		`ALTER TABLE approval_definitions ALTER COLUMN approval_type DROP NOT NULL`,
+		`ALTER TABLE approval_definitions ALTER COLUMN approval_type SET DEFAULT ''`,
+		`ALTER TABLE approval_definitions DROP CONSTRAINT IF EXISTS approval_definitions_approval_type_check`,
+		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS description TEXT`,
+		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS icon VARCHAR(50) DEFAULT 'approval'`,
+		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS group_name VARCHAR(50) NOT NULL DEFAULT '其他'`,
+		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS form_schema JSONB NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS flow_schema JSONB NOT NULL DEFAULT '{"nodes":[]}'`,
+		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS visibility VARCHAR(200) DEFAULT '全员'`,
+		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'draft'`,
+		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS admin_user_id VARCHAR(32)`,
+		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0`,
+		`ALTER TABLE approval_definitions ADD COLUMN IF NOT EXISTS created_by VARCHAR(32) DEFAULT ''`,
+		`INSERT INTO approval_groups (id, name, sort_order) VALUES
+			(gen_random_uuid(), '研发', 1),
+			(gen_random_uuid(), '供应链', 2),
+			(gen_random_uuid(), '财务', 3),
+			(gen_random_uuid(), '人事', 4),
+			(gen_random_uuid(), '行政', 5)
+		ON CONFLICT (name) DO NOTHING`,
+		// 给已有的 approval_requests 表增加字段
+		`ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS definition_id VARCHAR(36)`,
+		`ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS code VARCHAR(50)`,
+		`ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS current_node INT DEFAULT 0`,
+		`ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS flow_snapshot JSONB`,
+		// 给已有的 approval_reviewers 表增加字段
+		`ALTER TABLE approval_reviewers ADD COLUMN IF NOT EXISTS node_index INT DEFAULT 0`,
+		`ALTER TABLE approval_reviewers ADD COLUMN IF NOT EXISTS node_name VARCHAR(100)`,
+		`ALTER TABLE approval_reviewers ADD COLUMN IF NOT EXISTS review_type VARCHAR(20) DEFAULT 'approve'`,
 	}
 	for _, sql := range migrationSQL {
 		if err := db.Exec(sql).Error; err != nil {
@@ -247,6 +302,10 @@ func main() {
 	// V4: 设置审批和管理员处理器
 	handlers.Approval = handler.NewApprovalHandler(approvalSvc)
 	handlers.Admin = handler.NewAdminHandler(contactSyncSvc)
+
+	// V5: 审批定义服务
+	approvalDefSvc := service.NewApprovalDefinitionService(db, feishuWorkflowClient, approvalSvc)
+	handlers.ApprovalDef = handler.NewApprovalDefinitionHandler(approvalDefSvc)
 
 	// 设置Gin模式
 	if cfg.Server.Mode == "release" {
@@ -436,6 +495,27 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				approvals.GET("/:id", h.Approval.Get)
 				approvals.POST("/:id/approve", h.Approval.Approve)
 				approvals.POST("/:id/reject", h.Approval.Reject)
+			}
+
+			// V5: 审批定义管理
+			approvalDefs := authorized.Group("/approval-definitions")
+			{
+				approvalDefs.GET("", h.ApprovalDef.ListDefinitions)
+				approvalDefs.POST("", h.ApprovalDef.CreateDefinition)
+				approvalDefs.GET("/:id", h.ApprovalDef.GetDefinition)
+				approvalDefs.PUT("/:id", h.ApprovalDef.UpdateDefinition)
+				approvalDefs.DELETE("/:id", h.ApprovalDef.DeleteDefinition)
+				approvalDefs.POST("/:id/publish", h.ApprovalDef.PublishDefinition)
+				approvalDefs.POST("/:id/unpublish", h.ApprovalDef.UnpublishDefinition)
+				approvalDefs.POST("/:id/submit", h.ApprovalDef.SubmitInstance)
+			}
+
+			// V5: 审批分组管理
+			approvalGroups := authorized.Group("/approval-groups")
+			{
+				approvalGroups.GET("", h.ApprovalDef.ListGroups)
+				approvalGroups.POST("", h.ApprovalDef.CreateGroup)
+				approvalGroups.DELETE("/:id", h.ApprovalDef.DeleteGroup)
 			}
 
 			// 产品管理
