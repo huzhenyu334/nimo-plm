@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nimo ERP - 企业资源管理</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+
+        /* Layout */
+        .app { display: flex; min-height: 100vh; }
+        .sidebar { width: 240px; background: #1a1a2e; color: #fff; padding: 20px 0; flex-shrink: 0; }
+        .sidebar h1 { font-size: 20px; padding: 0 20px 20px; border-bottom: 1px solid #333; }
+        .sidebar h1 span { color: #4fc3f7; }
+        .sidebar nav { margin-top: 10px; }
+        .sidebar nav a { display: flex; align-items: center; padding: 12px 20px; color: #aaa; text-decoration: none; transition: all 0.2s; cursor: pointer; }
+        .sidebar nav a:hover, .sidebar nav a.active { background: #16213e; color: #fff; border-left: 3px solid #4fc3f7; }
+        .sidebar nav a .icon { margin-right: 10px; font-size: 18px; }
+        .main { flex: 1; padding: 24px; overflow-x: auto; }
+
+        /* Header */
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .header h2 { font-size: 24px; }
+        .header .actions { display: flex; gap: 10px; }
+
+        /* Cards */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .stat-card .label { font-size: 13px; color: #888; margin-bottom: 8px; }
+        .stat-card .value { font-size: 28px; font-weight: 700; }
+        .stat-card .value.green { color: #4caf50; }
+        .stat-card .value.blue { color: #2196f3; }
+        .stat-card .value.orange { color: #ff9800; }
+        .stat-card .value.red { color: #f44336; }
+
+        /* Table */
+        .table-container { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; }
+        .table-toolbar { padding: 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; }
+        .table-toolbar input { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; width: 250px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #fafafa; padding: 12px 16px; text-align: left; font-weight: 600; font-size: 13px; color: #666; border-bottom: 1px solid #eee; }
+        td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+        tr:hover td { background: #fafafa; }
+
+        /* Status badges */
+        .badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; display: inline-block; }
+        .badge.green { background: #e8f5e9; color: #2e7d32; }
+        .badge.blue { background: #e3f2fd; color: #1565c0; }
+        .badge.orange { background: #fff3e0; color: #e65100; }
+        .badge.red { background: #ffebee; color: #c62828; }
+        .badge.gray { background: #f5f5f5; color: #757575; }
+        .badge.yellow { background: #fffde7; color: #f57f17; }
+        .badge.purple { background: #f3e5f5; color: #6a1b9a; }
+
+        /* Buttons */
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+        .btn-primary { background: #1976d2; color: #fff; }
+        .btn-primary:hover { background: #1565c0; }
+        .btn-success { background: #4caf50; color: #fff; }
+        .btn-success:hover { background: #388e3c; }
+        .btn-danger { background: #f44336; color: #fff; }
+        .btn-small { padding: 4px 10px; font-size: 12px; }
+        .btn-outline { background: transparent; border: 1px solid #ddd; color: #555; }
+
+        /* Modal */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: #fff; border-radius: 8px; padding: 24px; width: 500px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
+        .modal h3 { margin-bottom: 16px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 4px; font-size: 13px; font-weight: 500; color: #555; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+        /* Loading */
+        .loading { text-align: center; padding: 40px; color: #888; }
+
+        /* MRP specific */
+        .mrp-results { margin-top: 16px; }
+        .mrp-action { display: flex; align-items: center; gap: 8px; }
+
+        /* Rating stars */
+        .rating-A { color: #4caf50; font-weight: 700; }
+        .rating-B { color: #2196f3; font-weight: 700; }
+        .rating-C { color: #ff9800; font-weight: 700; }
+        .rating-D { color: #f44336; font-weight: 700; }
+
+        /* Toast */
+        .toast { position: fixed; top: 20px; right: 20px; padding: 12px 24px; border-radius: 4px; color: #fff; z-index: 2000; animation: slideIn 0.3s ease; }
+        .toast.success { background: #4caf50; }
+        .toast.error { background: #f44336; }
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    </style>
+</head>
+<body>
+<div class="app">
+    <div class="sidebar">
+        <h1>🔧 Nimo <span>ERP</span></h1>
+        <nav>
+            <a onclick="showPage('dashboard')" class="active" id="nav-dashboard"><span class="icon">📊</span>Dashboard</a>
+            <a onclick="showPage('suppliers')" id="nav-suppliers"><span class="icon">🏭</span>供应商管理</a>
+            <a onclick="showPage('purchase-orders')" id="nav-purchase-orders"><span class="icon">📋</span>采购订单</a>
+            <a onclick="showPage('inventory')" id="nav-inventory"><span class="icon">📦</span>库存管理</a>
+            <a onclick="showPage('mrp')" id="nav-mrp"><span class="icon">🧮</span>MRP计划</a>
+            <a onclick="showPage('work-orders')" id="nav-work-orders"><span class="icon">🏭</span>生产工单</a>
+            <a onclick="showPage('customers')" id="nav-customers"><span class="icon">👥</span>客户管理</a>
+            <a onclick="showPage('sales-orders')" id="nav-sales-orders"><span class="icon">🛒</span>销售订单</a>
+            <a onclick="showPage('service-orders')" id="nav-service-orders"><span class="icon">🔧</span>售后服务</a>
+        </nav>
+    </div>
+    <div class="main" id="content">
+        <div class="loading">加载中...</div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+    <div class="modal" id="modal-content"></div>
+</div>
+
+<script>
+const API_BASE = '/api/v1/erp';
+const TOKEN = localStorage.getItem('token') || prompt('请输入JWT Token:');
+if (TOKEN) localStorage.setItem('token', TOKEN);
+
+async function api(path, options = {}) {
+    const res = await fetch(API_BASE + path, {
+        ...options,
+        headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json', ...options.headers }
+    });
+    return res.json();
+}
+
+function toast(msg, type = 'success') {
+    const el = document.createElement('div');
+    el.className = 'toast ' + type;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+}
+
+function showModal(html) {
+    document.getElementById('modal-content').innerHTML = html;
+    document.getElementById('modal-overlay').classList.add('active');
+}
+
+function closeModal() {
+    document.getElementById('modal-overlay').classList.remove('active');
+}
+
+document.getElementById('modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+
+function statusBadge(status) {
+    const map = {
+        'ACTIVE': 'green', 'DRAFT': 'gray', 'PENDING': 'orange', 'APPROVED': 'blue',
+        'SENT': 'purple', 'PARTIAL': 'yellow', 'RECEIVED': 'green', 'CLOSED': 'gray',
+        'CANCELLED': 'red', 'CREATED': 'gray', 'PLANNED': 'blue', 'RELEASED': 'purple',
+        'IN_PROGRESS': 'orange', 'COMPLETED': 'green', 'CONFIRMED': 'blue',
+        'PICKING': 'orange', 'SHIPPED': 'purple', 'DELIVERED': 'green',
+        'ASSIGNED': 'blue', 'WAITING_PARTS': 'yellow', 'RUNNING': 'orange',
+        'APPLIED': 'green', 'FAILED': 'red', 'INACTIVE': 'gray', 'BLACKLIST': 'red'
+    };
+    return `<span class="badge ${map[status] || 'gray'}">${status}</span>`;
+}
+
+let currentPage = 'dashboard';
+
+function showPage(page) {
+    currentPage = page;
+    document.querySelectorAll('.sidebar nav a').forEach(a => a.classList.remove('active'));
+    document.getElementById('nav-' + page)?.classList.add('active');
+    window['page_' + page.replace(/-/g, '_')]?.();
+}
+
+// ======== DASHBOARD ========
+async function page_dashboard() {
+    const [suppliers, pos, inventory, sos, wos, svcs, alerts] = await Promise.all([
+        api('/suppliers?size=1'), api('/purchase-orders?size=1'), api('/inventory?size=1'),
+        api('/sales-orders?size=1'), api('/work-orders?size=1'), api('/service-orders?size=1'),
+        api('/inventory/alerts')
+    ]);
+
+    document.getElementById('content').innerHTML = `
+        <div class="header"><h2>📊 Dashboard</h2></div>
+        <div class="stats-grid">
+            <div class="stat-card"><div class="label">供应商总数</div><div class="value blue">${suppliers.data?.total || 0}</div></div>
+            <div class="stat-card"><div class="label">采购订单</div><div class="value orange">${pos.data?.total || 0}</div></div>
+            <div class="stat-card"><div class="label">库存品项</div><div class="value green">${inventory.data?.total || 0}</div></div>
+            <div class="stat-card"><div class="label">库存预警</div><div class="value red">${alerts.data?.length || 0}</div></div>
+            <div class="stat-card"><div class="label">销售订单</div><div class="value blue">${sos.data?.total || 0}</div></div>
+            <div class="stat-card"><div class="label">生产工单</div><div class="value orange">${wos.data?.total || 0}</div></div>
+            <div class="stat-card"><div class="label">服务工单</div><div class="value">${svcs.data?.total || 0}</div></div>
+        </div>
+        <div class="stats-grid">
+            <div class="table-container" style="grid-column: span 2;">
+                <div class="table-toolbar"><strong>最近采购订单</strong></div>
+                <table><thead><tr><th>PO编号</th><th>状态</th><th>金额</th><th>创建时间</th></tr></thead>
+                <tbody id="dashboard-pos"></tbody></table>
+            </div>
+        </div>`;
+
+    const posData = await api('/purchase-orders?size=5');
+    document.getElementById('dashboard-pos').innerHTML = (posData.data?.items || []).map(po => `
+        <tr><td>${po.po_code}</td><td>${statusBadge(po.status)}</td><td>¥${po.total_amount?.toFixed(2)}</td><td>${new Date(po.created_at).toLocaleDateString()}</td></tr>
+    `).join('') || '<tr><td colspan="4" style="text-align:center;color:#888;">暂无数据</td></tr>';
+}
+
+// ======== SUPPLIERS ========
+async function page_suppliers() {
+    const data = await api('/suppliers');
+    document.getElementById('content').innerHTML = `
+        <div class="header"><h2>🏭 供应商管理</h2><div class="actions"><button class="btn btn-primary" onclick="showCreateSupplier()">+ 新增供应商</button></div></div>
+        <div class="table-container">
+            <table><thead><tr><th>编码</th><th>名称</th><th>类型</th><th>联系人</th><th>评级</th><th>综合评分</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody>${(data.data?.items || []).map(s => `
+                <tr>
+                    <td>${s.supplier_code}</td><td>${s.name}</td><td>${s.type}</td><td>${s.contact_name}</td>
+                    <td><span class="rating-${s.rating || '-'}">${s.rating || '-'}</span></td>
+                    <td>${s.overall_score?.toFixed(1) || '0.0'}</td>
+                    <td>${statusBadge(s.status)}</td>
+                    <td><button class="btn btn-small btn-outline" onclick="showScoreSupplier('${s.id}')">评分</button></td>
+                </tr>`).join('')}</tbody></table>
+        </div>`;
+}
+
+function showCreateSupplier() {
+    showModal(`<h3>新增供应商</h3>
+        <div class="form-group"><label>名称*</label><input id="sup-name" required></div>
+        <div class="form-group"><label>类型*</label><select id="sup-type"><option value="COMPONENT">元器件</option><option value="RAW_MATERIAL">原材料</option><option value="STRUCTURAL">结构件</option><option value="PACKAGING">包装</option></select></div>
+        <div class="form-group"><label>联系人*</label><input id="sup-contact"></div>
+        <div class="form-group"><label>电话*</label><input id="sup-phone"></div>
+        <div class="form-group"><label>邮箱</label><input id="sup-email"></div>
+        <div class="form-group"><label>地址*</label><input id="sup-address"></div>
+        <div class="form-group"><label>付款条款</label><input id="sup-payment" placeholder="如：月结30天"></div>
+        <div class="form-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="createSupplier()">创建</button></div>`);
+}
+
+async function createSupplier() {
+    const body = {
+        name: document.getElementById('sup-name').value,
+        type: document.getElementById('sup-type').value,
+        contact_name: document.getElementById('sup-contact').value,
+        phone: document.getElementById('sup-phone').value,
+        email: document.getElementById('sup-email').value,
+        address: document.getElementById('sup-address').value,
+        payment_terms: document.getElementById('sup-payment').value
+    };
+    const res = await api('/suppliers', { method: 'POST', body: JSON.stringify(body) });
+    if (res.code === 0) { toast('供应商创建成功'); closeModal(); page_suppliers(); }
+    else toast(res.message, 'error');
+}
+
+function showScoreSupplier(id) {
+    showModal(`<h3>供应商评分</h3>
+        <div class="form-group"><label>质量得分 (40%权重)</label><input id="score-quality" type="number" min="0" max="100" value="80"></div>
+        <div class="form-group"><label>交期得分 (30%权重)</label><input id="score-delivery" type="number" min="0" max="100" value="80"></div>
+        <div class="form-group"><label>价格得分 (20%权重)</label><input id="score-price" type="number" min="0" max="100" value="80"></div>
+        <div class="form-group"><label>服务得分 (10%权重)</label><input id="score-service" type="number" min="0" max="100" value="80"></div>
+        <div class="form-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="updateScore('${id}')">保存评分</button></div>`);
+}
+
+async function updateScore(id) {
+    const body = {
+        quality_score: +document.getElementById('score-quality').value,
+        delivery_score: +document.getElementById('score-delivery').value,
+        price_score: +document.getElementById('score-price').value,
+        service_score: +document.getElementById('score-service').value
+    };
+    const res = await api('/suppliers/' + id + '/score', { method: 'PUT', body: JSON.stringify(body) });
+    if (res.code === 0) { toast('评分更新成功'); closeModal(); page_suppliers(); }
+    else toast(res.message, 'error');
+}
+
+// ======== PURCHASE ORDERS ========
+async function page_purchase_orders() {
+    const data = await api('/purchase-orders');
+    document.getElementById('content').innerHTML = `
+        <div class="header"><h2>📋 采购订单</h2><div class="actions"><button class="btn btn-primary" onclick="showCreatePO()">+ 新建采购订单</button></div></div>
+        <div class="table-container">
+            <table><thead><tr><th>PO编号</th><th>供应商</th><th>状态</th><th>总金额</th><th>预计到货</th><th>操作</th></tr></thead>
+            <tbody>${(data.data?.items || []).map(po => `
+                <tr>
+                    <td>${po.po_code}</td><td>${po.supplier?.name || '-'}</td>
+                    <td>${statusBadge(po.status)}</td><td>¥${po.total_amount?.toFixed(2)}</td>
+                    <td>${po.expected_date ? new Date(po.expected_date).toLocaleDateString() : '-'}</td>
+                    <td>
+                        ${po.status === 'DRAFT' ? `<button class="btn btn-small btn-primary" onclick="submitPO('${po.id}')">提交</button>` : ''}
+                        ${po.status === 'PENDING' ? `<button class="btn btn-small btn-success" onclick="approvePO('${po.id}')">审批</button>` : ''}
+                        ${po.status === 'APPROVED' ? `<button class="btn btn-small btn-primary" onclick="sendPO('${po.id}')">发送</button>` : ''}
+                    </td>
+                </tr>`).join('')}</tbody></table>
+        </div>`;
+}
+
+async function submitPO(id) { const r = await api('/purchase-orders/' + id + '/submit', { method: 'POST' }); if (r.code === 0) { toast('已提交'); page_purchase_orders(); } else toast(r.message, 'error'); }
+async function approvePO(id) { const r = await api('/purchase-orders/' + id + '/approve', { method: 'POST' }); if (r.code === 0) { toast('已审批'); page_purchase_orders(); } else toast(r.message, 'error'); }
+async function sendPO(id) { const r = await api('/purchase-orders/' + id + '/send', { method: 'POST' }); if (r.code === 0) { toast('已发送'); page_purchase_orders(); } else toast(r.message, 'error'); }
+
+function showCreatePO() {
+    showModal(`<h3>新建采购订单</h3><p style="color:#888;font-size:13px;">请通过API创建（前端表单开发中）</p>
+        <div class="form-actions"><button class="btn btn-outline" onclick="closeModal()">关闭</button></div>`);
+}
+
+// ======== INVENTORY ========
+async function page_inventory() {
+    const [data, alerts] = await Promise.all([api('/inventory'), api('/inventory/alerts')]);
+    document.getElementById('content').innerHTML = `
+        <div class="header"><h2>📦 库存管理</h2></div>
+        ${alerts.data?.length > 0 ? `<div style="background:#fff3e0;padding:12px 16px;border-radius:4px;margin-bottom:16px;border-left:4px solid #ff9800;">⚠️ 有 ${alerts.data.length} 个物料库存低于安全库存</div>` : ''}
+        <div class="table-container">
+            <table><thead><tr><th>物料编码</th><th>物料名称</th><th>类型</th><th>数量</th><th>可用</th><th>预留</th><th>安全库存</th><th>仓库</th></tr></thead>
+            <tbody>${(data.data?.items || []).map(inv => `
+                <tr>
+                    <td>${inv.material_code || '-'}</td><td>${inv.material_name || '-'}</td>
+                    <td>${inv.inventory_type}</td>
+                    <td>${inv.quantity?.toFixed(2)}</td><td>${inv.available_qty?.toFixed(2)}</td><td>${inv.reserved_qty?.toFixed(2)}</td>
+                    <td>${inv.safety_stock?.toFixed(2)}</td>
+                    <td>${inv.warehouse?.name || '-'}</td>
+                </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:#888;">暂无库存数据</td></tr>'}</tbody></table>
+        </div>`;
+}
+
+// ======== MRP ========
+async function page_mrp() {
+    const runs = await api('/mrp/runs');
+    document.getElementById('content').innerHTML = `
+        <div class="header"><h2>🧮 MRP物料需求计划</h2><div class="actions"><button class="btn btn-success" onclick="runMRP()">▶ 执行MRP计算</button></div></div>
+        <div class="table-container">
+            <div class="table-toolbar"><strong>MRP运行历史</strong></div>
+            <table><thead><tr><th>运行编号</th><th>状态</th><th>物料项数</th><th>生成PR</th><th>生成WO</th><th>开始时间</th><th>操作</th></tr></thead>
+            <tbody>${(runs.data?.items || []).map(r => `
+                <tr>
+                    <td>${r.run_code}</td><td>${statusBadge(r.status)}</td>
+                    <td>${r.total_items}</td><td>${r.prs_generated}</td><td>${r.wos_generated}</td>
+                    <td>${new Date(r.started_at).toLocaleString()}</td>
+                    <td>
+                        <button class="btn btn-small btn-outline" onclick="viewMRPResult('${r.id}')">查看结果</button>
+                        ${r.status === 'COMPLETED' ? `<button class="btn btn-small btn-primary" onclick="applyMRP('${r.id}')">确认应用</button>` : ''}
+                    </td>
+                </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:#888;">暂无运行记录，点击"执行MRP计算"开始</td></tr>'}</tbody></table>
+        </div>
+        <div id="mrp-results"></div>`;
+}
+
+async function runMRP() {
+    toast('正在执行MRP计算...');
+    const res = await api('/mrp/run', { method: 'POST', body: JSON.stringify({ planning_horizon: 30 }) });
+    if (res.code === 0) { toast(`MRP计算完成！共 ${res.data.total_items} 个物料需求`); page_mrp(); }
+    else toast(res.message, 'error');
+}
+
+async function viewMRPResult(runId) {
+    const res = await api('/mrp/result?run_id=' + runId);
+    const items = res.data || [];
+    document.getElementById('mrp-results').innerHTML = `
+        <div class="table-container" style="margin-top:16px;">
+            <div class="table-toolbar"><strong>MRP计算结果</strong><span style="color:#888;margin-left:10px;">${items.length} 条</span></div>
+            <table><thead><tr><th>物料编码</th><th>物料名称</th><th>毛需求</th><th>现有库存</th><th>在途</th><th>在制</th><th>净需求</th><th>计划数量</th><th>动作</th></tr></thead>
+            <tbody>${items.map(i => `
+                <tr style="${i.net_requirement > 0 ? 'background:#fff8e1;' : ''}">
+                    <td>${i.material_code}</td><td>${i.material_name}</td>
+                    <td>${i.gross_requirement?.toFixed(2)}</td><td>${i.on_hand_stock?.toFixed(2)}</td>
+                    <td>${i.in_transit_qty?.toFixed(2)}</td><td>${i.in_production_qty?.toFixed(2)}</td>
+                    <td><strong style="color:${i.net_requirement > 0 ? '#f44336' : '#4caf50'}">${i.net_requirement?.toFixed(2)}</strong></td>
+                    <td>${i.planned_order_qty?.toFixed(2)}</td>
+                    <td>${i.action_type === 'PURCHASE' ? '<span class="badge blue">采购</span>' : '<span class="badge purple">生产</span>'}</td>
+                </tr>`).join('')}</tbody></table>
+        </div>`;
+}
+
+async function applyMRP(runId) {
+    if (!confirm('确认应用MRP结果？将自动生成采购需求和生产工单。')) return;
+    const res = await api('/mrp/apply', { method: 'POST', body: JSON.stringify({ run_id: runId }) });
+    if (res.code === 0) { toast('MRP结果已应用'); page_mrp(); }
+    else toast(res.message, 'error');
+}
+
+// ======== WORK ORDERS ========
+async function page_work_orders() {
+    const data = await api('/work-orders');
+    document.getElementById('content').innerHTML = `
+        <div class="header"><h2>🏭 生产工单</h2></div>
+        <div class="table-container">
+            <table><thead><tr><th>工单编号</th><th>产品</th><th>BOM版本</th><th>计划数量</th><th>完成数量</th><th>状态</th><th>计划开始</th><th>操作</th></tr></thead>
+            <tbody>${(data.data?.items || []).map(wo => `
+                <tr>
+                    <td>${wo.wo_code}</td><td>${wo.product_name || '-'}</td><td>${wo.bom_version || '-'}</td>
+                    <td>${wo.planned_qty}</td><td>${wo.completed_qty}</td>
+                    <td>${statusBadge(wo.status)}</td>
+                    <td>${wo.planned_start ? new Date(wo.planned_start).toLocaleDateString() : '-'}</td>
+                    <td>
+                        ${wo.status === 'CREATED' || wo.status === 'PLANNED' ? `<button class="btn btn-small btn-primary" onclick="releaseWO('${wo.id}')">下达</button>` : ''}
+                    </td>
+                </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:#888;">暂无工单</td></tr>'}</tbody></table>
+        </div>`;
+}
+
+async function releaseWO(id) { const r = await api('/work-orders/' + id + '/release', { method: 'POST' }); if (r.code === 0) { toast('工单已下达'); page_work_orders(); } else toast(r.message, 'error'); }
+
+// ======== CUSTOMERS ========
+async function page_customers() {
+    const data = await api('/customers');
+    document.getElementById('content').innerHTML = `
+        <div class="header"><h2>👥 客户管理</h2><div class="actions"><button class="btn btn-primary" onclick="showCreateCustomer()">+ 新增客户</button></div></div>
+        <div class="table-container">
+            <table><thead><tr><th>编码</th><th>名称</th><th>类型</th><th>联系人</th><th>电话</th><th>状态</th></tr></thead>
+            <tbody>${(data.data?.items || []).map(c => `
+                <tr><td>${c.customer_code}</td><td>${c.name}</td><td>${c.type}</td><td>${c.contact_name || '-'}</td><td>${c.phone || '-'}</td><td>${statusBadge(c.status)}</td></tr>
+            `).join('')}</tbody></table>
+        </div>`;
+}
+
+function showCreateCustomer() {
+    showModal(`<h3>新增客户</h3>
+        <div class="form-group"><label>名称*</label><input id="cust-name" required></div>
+        <div class="form-group"><label>类型</label><select id="cust-type"><option value="RETAIL">零售</option><option value="WHOLESALE">批发</option><option value="DISTRIBUTOR">代理商</option><option value="ENTERPRISE">企业</option></select></div>
+        <div class="form-group"><label>联系人</label><input id="cust-contact"></div>
+        <div class="form-group"><label>电话</label><input id="cust-phone"></div>
+        <div class="form-group"><label>地址</label><input id="cust-address"></div>
+        <div class="form-actions"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="createCustomer()">创建</button></div>`);
+}
+
+async function createCustomer() {
+    const body = {
+        name: document.getElementById('cust-name').value,
+        type: document.getElementById('cust-type').value,
+        contact_name: document.getElementById('cust-contact').value,
+        phone: document.getElementById('cust-phone').value,
+        address: document.getElementById('cust-address').value
+    };
+    const res = await api('/customers', { method: 'POST', body: JSON.stringify(body) });
+    if (res.code === 0) { toast('客户创建成功'); closeModal(); page_customers(); }
+    else toast(res.message, 'error');
+}
+
+// ======== SALES ORDERS ========
+async function page_sales_orders() {
+    const data = await api('/sales-orders');
+    document.getElementById('content').innerHTML = `
+        <div class="header"><h2>🛒 销售订单</h2></div>
+        <div class="table-container">
+            <table><thead><tr><th>SO编号</th><th>客户</th><th>渠道</th><th>状态</th><th>总金额</th><th>下单日期</th><th>操作</th></tr></thead>
+            <tbody>${(data.data?.items || []).map(so => `
+                <tr>
+                    <td>${so.so_code}</td><td>${so.customer?.name || '-'}</td><td>${so.channel}</td>
+                    <td>${statusBadge(so.status)}</td><td>¥${so.total_amount?.toFixed(2)}</td>
+                    <td>${so.order_date ? new Date(so.order_date).toLocaleDateString() : '-'}</td>
+                    <td>
+                        ${so.status === 'PENDING' ? `<button class="btn btn-small btn-success" onclick="confirmSO('${so.id}')">确认</button>` : ''}
+                        ${so.status === 'CONFIRMED' ? `<button class="btn btn-small btn-primary" onclick="shipSO('${so.id}')">发货</button>` : ''}
+                    </td>
+                </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:#888;">暂无订单</td></tr>'}</tbody></table>
+        </div>`;
+}
+
+async function confirmSO(id) { const r = await api('/sales-orders/' + id + '/confirm', { method: 'POST' }); if (r.code === 0) { toast('已确认'); page_sales_orders(); } else toast(r.message, 'error'); }
+async function shipSO(id) { const r = await api('/sales-orders/' + id + '/ship', { method: 'POST', body: JSON.stringify({}) }); if (r.code === 0) { toast('已发货'); page_sales_orders(); } else toast(r.message, 'error'); }
+
+// ======== SERVICE ORDERS ========
+async function page_service_orders() {
+    const data = await api('/service-orders');
+    document.getElementById('content').innerHTML = `
+        <div class="header"><h2>🔧 售后服务</h2></div>
+        <div class="table-container">
+            <table><thead><tr><th>服务单号</th><th>类型</th><th>产品SN</th><th>状态</th><th>处理人</th><th>创建时间</th></tr></thead>
+            <tbody>${(data.data?.items || []).map(so => `
+                <tr>
+                    <td>${so.service_code}</td><td>${so.service_type}</td><td>${so.product_sn}</td>
+                    <td>${statusBadge(so.status)}</td><td>${so.assignee_name || '-'}</td>
+                    <td>${new Date(so.created_at).toLocaleDateString()}</td>
+                </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:#888;">暂无服务工单</td></tr>'}</tbody></table>
+        </div>`;
+}
+
+// Init
+showPage('dashboard');
+</script>
+</body>
+</html>
