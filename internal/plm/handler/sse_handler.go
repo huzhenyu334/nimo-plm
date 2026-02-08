@@ -43,7 +43,7 @@ func (h *SSEHandler) Stream(c *gin.Context) {
 	c.Writer.Flush()
 
 	// Heartbeat ticker
-	heartbeat := time.NewTicker(30 * time.Second)
+	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
 	// Client disconnect detection
