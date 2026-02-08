@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bitfantasy/nimo/internal/plm/entity"
+	"github.com/bitfantasy/nimo/internal/plm/sse"
 	"github.com/bitfantasy/nimo/internal/shared/feishu"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -231,6 +232,9 @@ func (s *ApprovalService) Approve(ctx context.Context, approvalID, reviewerUserI
 			go s.notifyRequester(context.Background(), &approval, "approved", comment)
 		}
 
+		// SSE: 通知前端审批通过
+		go sse.PublishTaskUpdate(approval.ProjectID, approval.TaskID, "approval_approved")
+
 		return nil
 	})
 }
@@ -283,6 +287,9 @@ func (s *ApprovalService) Reject(ctx context.Context, approvalID, reviewerUserID
 			if s.feishuClient != nil {
 				go s.notifyRequester(context.Background(), &approval, "rejected", comment)
 			}
+
+			// SSE: 通知前端审批驳回
+			go sse.PublishTaskUpdate(approval.ProjectID, approval.TaskID, "approval_rejected")
 		}
 
 		return nil

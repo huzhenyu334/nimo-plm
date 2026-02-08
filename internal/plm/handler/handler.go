@@ -35,6 +35,8 @@ type Handlers struct {
 	// V6 任务表单 + 文件上传
 	TaskForm    *TaskFormHandler
 	Upload      *UploadHandler
+	// V7 SSE
+	SSE         *SSEHandler
 }
 
 // NewHandlers 创建处理器集合
@@ -58,6 +60,8 @@ func NewHandlers(svc *service.Services, repos *repository.Repositories, cfg *con
 		// V6 任务表单 + 文件上传
 		TaskForm:    NewTaskFormHandler(repos.TaskForm, repos.Project),
 		Upload:      NewUploadHandler(),
+		// V7 SSE
+		SSE:         NewSSEHandler(),
 	}
 	// V3 工作流
 	if workflowSvc != nil {

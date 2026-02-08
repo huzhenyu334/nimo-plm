@@ -92,28 +92,30 @@ type JWTClaims struct {
 // JWTAuth JWT认证中间件
 func JWTAuth(secret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		var tokenString string
+
+		// 先尝试从 Authorization header 获取
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenString = parts[1]
+			}
+		}
+
+		// 回退到 query param（SSE 等场景使用）
+		if tokenString == "" {
+			tokenString = c.Query("token")
+		}
+
+		if tokenString == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"code":    40100,
-				"message": "Authorization header is required",
+				"message": "Authorization is required",
 			})
 			c.Abort()
 			return
 		}
-
-		// 解析Bearer token
-		parts := strings.SplitN(authHeader, " ", 2)
-		if !(len(parts) == 2 && parts[0] == "Bearer") {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    40101,
-				"message": "Invalid authorization header format",
-			})
-			c.Abort()
-			return
-		}
-
-		tokenString := parts[1]
 
 		// 解析token
 		token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {

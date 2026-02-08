@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bitfantasy/nimo/internal/plm/entity"
+	"github.com/bitfantasy/nimo/internal/plm/sse"
 	"github.com/bitfantasy/nimo/internal/plm/repository"
 	"github.com/google/uuid"
 )
@@ -572,6 +573,9 @@ func (s *ProjectService) UpdateTaskStatus(ctx context.Context, id string, status
 	// 更新项目进度
 	go s.updateProjectProgress(context.Background(), task.ProjectID)
 
+	// SSE: 通知前端任务状态变更
+	go sse.PublishTaskUpdate(task.ProjectID, task.ID, "status_change")
+
 	return task, nil
 }
 
@@ -752,6 +756,9 @@ func (s *ProjectService) CompleteMyTask(ctx context.Context, taskID, userID stri
 	// 6. 更新项目进度
 	go s.updateProjectProgress(context.Background(), task.ProjectID)
 
+	// SSE: 通知前端任务完成
+	go sse.PublishTaskUpdate(task.ProjectID, task.ID, "task_completed")
+
 	return nil
 }
 
@@ -782,6 +789,9 @@ func (s *ProjectService) ConfirmTask(ctx context.Context, projectID, taskID, use
 	if err := s.taskRepo.Update(ctx, task); err != nil {
 		return fmt.Errorf("更新任务状态失败: %w", err)
 	}
+
+	// SSE: 通知前端任务确认
+	go sse.PublishTaskUpdate(task.ProjectID, task.ID, "task_confirmed")
 
 	return nil
 }
@@ -831,6 +841,9 @@ func (s *ProjectService) RejectTask(ctx context.Context, projectID, taskID, user
 
 	// 5. 更新项目进度
 	go s.updateProjectProgress(context.Background(), task.ProjectID)
+
+	// SSE: 通知前端任务驳回
+	go sse.PublishTaskUpdate(task.ProjectID, task.ID, "task_rejected")
 
 	return nil
 }

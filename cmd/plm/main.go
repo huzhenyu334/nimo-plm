@@ -487,6 +487,13 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 			webhooks.POST("/feishu/event", handleFeishuEventVerification)
 		}
 
+		// SSE 实时推送（需要认证，支持 query param token）
+		sseGroup := v1.Group("/sse")
+		sseGroup.Use(middleware.JWTAuth(cfg.JWT.Secret))
+		{
+			sseGroup.GET("/events", h.SSE.Stream)
+		}
+
 		// 需要认证的接口
 		authorized := v1.Group("")
 		authorized.Use(middleware.JWTAuth(cfg.JWT.Secret))
