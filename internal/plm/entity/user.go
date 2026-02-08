@@ -10,7 +10,7 @@ type User struct {
 	FeishuUserID  string     `json:"feishu_user_id" gorm:"size:64;uniqueIndex"`
 	FeishuUnionID string     `json:"feishu_union_id" gorm:"size:64"`
 	FeishuOpenID  string     `json:"feishu_open_id" gorm:"size:64"`
-	EmployeeNo    string     `json:"employee_no" gorm:"size:32;uniqueIndex"`
+	EmployeeNo    string     `json:"employee_no" gorm:"size:32;index"`
 	Username      string     `json:"username" gorm:"size:64;not null;uniqueIndex"`
 	Name          string     `json:"name" gorm:"size:64;not null"`
 	Email         string     `json:"email" gorm:"size:128;uniqueIndex"`

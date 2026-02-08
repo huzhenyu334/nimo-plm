@@ -71,6 +71,9 @@ func main() {
 		zapLogger.Warn("AutoMigrate task form tables warning", zap.Error(err))
 	}
 
+	// 清理旧的唯一索引（EmployeeNo 允许为空，不再需要唯一约束）
+	db.Exec("DROP INDEX IF EXISTS idx_users_employee_no")
+
 	// 手动添加新列（AutoMigrate 会触发 FK 级联问题，所以用原始 SQL）
 	migrationSQL := []string{
 		"ALTER TABLE template_tasks ADD COLUMN IF NOT EXISTS auto_create_feishu_task boolean DEFAULT false",
