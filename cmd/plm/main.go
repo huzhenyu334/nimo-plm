@@ -276,6 +276,20 @@ func main() {
 		`ALTER TABLE approval_reviewers ADD COLUMN IF NOT EXISTS node_index INT DEFAULT 0`,
 		`ALTER TABLE approval_reviewers ADD COLUMN IF NOT EXISTS node_name VARCHAR(100)`,
 		`ALTER TABLE approval_reviewers ADD COLUMN IF NOT EXISTS review_type VARCHAR(20) DEFAULT 'approve'`,
+
+		// V8: 任务角色分配字段
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS default_assignee_role VARCHAR(50) DEFAULT ''`,
+
+		// V9: 任务角色表（区别于权限角色 roles 表）
+		`CREATE TABLE IF NOT EXISTS task_roles (
+			id VARCHAR(36) PRIMARY KEY,
+			code VARCHAR(50) NOT NULL UNIQUE,
+			name VARCHAR(100) NOT NULL,
+			is_system BOOLEAN NOT NULL DEFAULT false,
+			sort_order INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		)`,
 	}
 	for _, sql := range migrationSQL {
 		if err := db.Exec(sql).Error; err != nil {
@@ -283,6 +297,40 @@ func main() {
 		}
 	}
 	zapLogger.Info("Database migration completed")
+
+	// Seed: 默认PLM角色
+	roleSeeds := []struct{ Code, Name string }{
+		{"hw_engineer", "硬件工程师"},
+		{"sw_engineer", "软件工程师"},
+		{"me_engineer", "结构工程师"},
+		{"qa_engineer", "质量工程师"},
+		{"pm", "项目经理"},
+		{"id_designer", "工业设计师"},
+		{"te_engineer", "测试工程师"},
+		{"supply_chain", "供应链"},
+	}
+	for _, rs := range roleSeeds {
+		db.Exec(`INSERT INTO roles (id, code, name, status, is_system, created_at, updated_at)
+			VALUES (gen_random_uuid(), ?, ?, 'active', true, NOW(), NOW())
+			ON CONFLICT (code) DO NOTHING`, rs.Code, rs.Name)
+	}
+
+	// Seed: 预设任务角色（用于模板任务分配）
+	taskRoleSeeds := []struct{ Code, Name string; Sort int }{
+		{"pm", "项目经理", 1},
+		{"hw_engineer", "硬件工程师", 2},
+		{"sw_engineer", "软件工程师", 3},
+		{"struct_engineer", "结构工程师", 4},
+		{"test_engineer", "测试工程师", 5},
+		{"qa_engineer", "品质工程师", 6},
+		{"procurement", "采购", 7},
+		{"id_engineer", "ID工程师", 8},
+	}
+	for _, rs := range taskRoleSeeds {
+		db.Exec(`INSERT INTO task_roles (id, code, name, is_system, sort_order, created_at, updated_at)
+			VALUES (gen_random_uuid(), ?, ?, true, ?, NOW(), NOW())
+			ON CONFLICT (code) DO NOTHING`, rs.Code, rs.Name, rs.Sort)
+	}
 
 	// 初始化Redis
 	rdb := initRedis(cfg.Redis)
@@ -331,6 +379,13 @@ func main() {
 	// V5: 审批定义服务
 	approvalDefSvc := service.NewApprovalDefinitionService(db, feishuWorkflowClient, approvalSvc)
 	handlers.ApprovalDef = handler.NewApprovalDefinitionHandler(approvalDefSvc)
+
+	// V8: 角色管理 + 注入审批服务到项目服务
+	handlers.Role = handler.NewRoleHandler(db, feishuWorkflowClient)
+	services.Project.SetApprovalService(approvalSvc)
+	services.Project.SetFeishuClient(feishuWorkflowClient, repos.User)
+	approvalSvc.SetProjectService(services.Project)
+	services.Template.SetProjectService(services.Project)
 
 	// 设置Gin模式
 	if cfg.Server.Mode == "release" {
@@ -553,6 +608,22 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				approvalGroups.DELETE("/:id", h.ApprovalDef.DeleteGroup)
 			}
 
+			// V8: 角色管理
+			roles := authorized.Group("/roles")
+			{
+				roles.GET("", h.Role.List)
+				roles.POST("", h.Role.Create)
+				roles.GET("/:id", h.Role.Get)
+				roles.PUT("/:id", h.Role.Update)
+				roles.DELETE("/:id", h.Role.Delete)
+			}
+
+			// 任务角色（用于模板任务分配）
+			authorized.GET("/task-roles", h.Role.ListTaskRoles)
+
+			// 飞书角色（部门列表）
+			authorized.GET("/feishu/roles", h.Role.ListFeishuRoles)
+
 			// 产品管理
 			products := authorized.Group("/products")
 			{
@@ -597,6 +668,9 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				projects.PUT("/:id", h.Project.UpdateProject)
 				projects.DELETE("/:id", h.Project.DeleteProject)
 				projects.PUT("/:id/status", h.Project.UpdateProjectStatus)
+
+				// 项目级角色分配
+				projects.POST("/:id/assign-roles", h.Project.AssignRoles)
 
 				// 项目阶段
 				projects.GET("/:id/phases", h.Project.ListPhases)
@@ -717,6 +791,7 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				templates.PUT("/:id/tasks/batch", h.Template.BatchSaveTasks)
 				templates.POST("/:id/publish", h.Template.Publish)
 				templates.POST("/:id/upgrade", h.Template.UpgradeVersion)
+				templates.POST("/:id/revert", h.Template.Revert)
 				templates.GET("/:id/versions", h.Template.ListVersions)
 
 				// V7: 模板任务表单

@@ -590,6 +590,19 @@ func (h *TemplateHandler) UpgradeVersion(c *gin.Context) {
 	Created(c, newTemplate)
 }
 
+// Revert 撤销草稿，回退到上一个已发布版本
+func (h *TemplateHandler) Revert(c *gin.Context) {
+	id := c.Param("id")
+
+	prevVersion, err := h.svc.RevertTemplate(c.Request.Context(), id)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	Success(c, prevVersion)
+}
+
 // ListVersions 获取流程版本历史
 func (h *TemplateHandler) ListVersions(c *gin.Context) {
 	id := c.Param("id")

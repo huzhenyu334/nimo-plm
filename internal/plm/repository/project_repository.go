@@ -140,8 +140,8 @@ func (r *ProjectRepository) GetTaskStats(ctx context.Context, projectID string) 
 	r.db.WithContext(ctx).Model(&entity.Task{}).Where("project_id = ? AND status = ?", projectID, entity.TaskStatusCompleted).Count(&completed)
 	r.db.WithContext(ctx).Model(&entity.Task{}).Where("project_id = ? AND status = ?", projectID, entity.TaskStatusInProgress).Count(&inProgress)
 	r.db.WithContext(ctx).Model(&entity.Task{}).Where("project_id = ? AND status = ?", projectID, entity.TaskStatusPending).Count(&pending)
-	r.db.WithContext(ctx).Model(&entity.Task{}).Where("project_id = ? AND status = ?", projectID, entity.TaskStatusBlocked).Count(&blocked)
-	
+	r.db.WithContext(ctx).Model(&entity.Task{}).Where("project_id = ? AND status = ?", projectID, entity.TaskStatusSubmitted).Count(&blocked)
+
 	return
 }
 

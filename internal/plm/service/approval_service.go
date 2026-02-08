@@ -18,11 +18,17 @@ import (
 type ApprovalService struct {
 	db           *gorm.DB
 	feishuClient *feishu.FeishuClient
+	projectSvc   *ProjectService
 }
 
 // NewApprovalService 创建审批服务
 func NewApprovalService(db *gorm.DB, fc *feishu.FeishuClient) *ApprovalService {
 	return &ApprovalService{db: db, feishuClient: fc}
+}
+
+// SetProjectService 注入项目服务（用于下游任务激活通知）
+func (s *ApprovalService) SetProjectService(svc *ProjectService) {
+	s.projectSvc = svc
 }
 
 // CreateApprovalReq 创建审批请求参数
@@ -207,13 +213,13 @@ func (s *ApprovalService) Approve(ctx context.Context, approvalID, reviewerUserI
 			return fmt.Errorf("更新审批状态失败: %w", err)
 		}
 
-		// 更新关联任务状态: reviewing → confirmed（审批通过自动确认）
+		// 更新关联任务状态: reviewing → completed（审批通过直接完成）
 		if approval.TaskID != "" {
 			completedAt := time.Now()
 			result := tx.Model(&entity.Task{}).
 				Where("id = ? AND status = ?", approval.TaskID, entity.TaskStatusReviewing).
 				Updates(map[string]interface{}{
-					"status":     entity.TaskStatusConfirmed,
+					"status":     entity.TaskStatusCompleted,
 					"actual_end": completedAt,
 					"progress":   100,
 					"updated_at": completedAt,
@@ -233,7 +239,7 @@ func (s *ApprovalService) Approve(ctx context.Context, approvalID, reviewerUserI
 		}
 
 		// SSE: 通知前端审批通过
-		go sse.PublishTaskUpdate(approval.ProjectID, approval.TaskID, "approval_approved")
+		sse.PublishTaskUpdate(approval.ProjectID, approval.TaskID, "approval_approved")
 
 		return nil
 	})
@@ -289,7 +295,7 @@ func (s *ApprovalService) Reject(ctx context.Context, approvalID, reviewerUserID
 			}
 
 			// SSE: 通知前端审批驳回
-			go sse.PublishTaskUpdate(approval.ProjectID, approval.TaskID, "approval_rejected")
+			sse.PublishTaskUpdate(approval.ProjectID, approval.TaskID, "approval_rejected")
 		}
 
 		return nil
@@ -505,7 +511,7 @@ func (s *ApprovalService) autoStartDependentTasks(ctx context.Context, db *gorm.
 				allCompleted = false
 				break
 			}
-			if depTask.Status != entity.TaskStatusCompleted && depTask.Status != entity.TaskStatusConfirmed {
+			if depTask.Status != entity.TaskStatusCompleted {
 				allCompleted = false
 				break
 			}
@@ -520,6 +526,22 @@ func (s *ApprovalService) autoStartDependentTasks(ctx context.Context, db *gorm.
 				continue
 			}
 			log.Printf("[ApprovalService] 审批通过后自动启动任务 task=%s (依赖任务 %s 完成)", task.ID, completedTaskID)
+
+			// SSE: 通知前端任务被激活
+			sse.PublishTaskUpdate(projectID, task.ID, "task_activated")
+			// SSE: 如果任务有 assignee，给特定用户发个人事件
+			if task.AssigneeID != nil && *task.AssigneeID != "" {
+				sse.PublishUserTaskUpdate(*task.AssigneeID, projectID, task.ID, "task_activated")
+			}
+
+			// 发送飞书通知（延迟2秒，确保审批通过通知先到达）
+			if s.projectSvc != nil {
+				taskCopy := task
+				go func() {
+					time.Sleep(2 * time.Second)
+					s.projectSvc.notifyTaskActivation(context.Background(), &taskCopy)
+				}()
+			}
 		}
 	}
 }

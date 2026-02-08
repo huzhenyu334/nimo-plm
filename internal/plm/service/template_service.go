@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/bitfantasy/nimo/internal/plm/entity"
 	"github.com/bitfantasy/nimo/internal/plm/repository"
+	"github.com/bitfantasy/nimo/internal/plm/sse"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -18,6 +20,12 @@ type TemplateService struct {
 	templateRepo *repository.TemplateRepository
 	projectRepo  *repository.ProjectRepository
 	taskFormRepo *repository.TaskFormRepository
+	projectSvc   *ProjectService
+}
+
+// SetProjectService 注入项目服务（用于任务激活通知）
+func (s *TemplateService) SetProjectService(svc *ProjectService) {
+	s.projectSvc = svc
 }
 
 // NewTemplateService 创建模板服务
@@ -297,6 +305,45 @@ func (s *TemplateService) CreateNewVersion(ctx context.Context, source *entity.P
 	return s.templateRepo.GetWithTasks(ctx, newTemplate.ID)
 }
 
+// RevertTemplate 撤销草稿，回退到上一个已发布版本
+func (s *TemplateService) RevertTemplate(ctx context.Context, id string) (*entity.ProjectTemplate, error) {
+	// 获取当前模板
+	tmpl, err := s.templateRepo.GetWithTasks(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("template not found: %w", err)
+	}
+
+	if tmpl.Status != "draft" {
+		return nil, fmt.Errorf("只有草稿状态的流程才能撤销")
+	}
+
+	baseCode := tmpl.BaseCode
+	if baseCode == "" {
+		return nil, fmt.Errorf("该流程没有可回退的历史版本")
+	}
+
+	// 查找同 base_code 下的上一个已发布版本
+	db := s.templateRepo.DB()
+	var prevPublished entity.ProjectTemplate
+	err = db.Where("(base_code = ? OR code = ?) AND status = ? AND id != ?", baseCode, baseCode, "published", id).
+		Order("version DESC").
+		First(&prevPublished).Error
+	if err != nil {
+		return nil, fmt.Errorf("没有可回退的已发布版本")
+	}
+
+	// 删除当前草稿
+	if err := s.templateRepo.Delete(ctx, id); err != nil {
+		return nil, fmt.Errorf("删除草稿失败: %w", err)
+	}
+
+	// 删除草稿关联的任务和依赖
+	db.Exec("DELETE FROM template_tasks WHERE template_id = ?", id)
+	db.Exec("DELETE FROM template_task_dependencies WHERE template_id = ?", id)
+
+	return &prevPublished, nil
+}
+
 // ListVersions 获取同一流程的所有版本
 func (s *TemplateService) ListVersions(ctx context.Context, baseCode string) ([]entity.ProjectTemplate, error) {
 	db := s.templateRepo.DB()
@@ -388,10 +435,17 @@ func (s *TemplateService) CreateProjectFromTemplate(ctx context.Context, input *
 		ttMap[tt.TaskCode] = tt
 	}
 
+	// 构建有依赖的 task_code 集合（用于判断哪些任务可以直接激活）
+	tasksWithDeps := make(map[string]bool)
+	for _, dep := range template.Dependencies {
+		tasksWithDeps[dep.TaskCode] = true
+	}
+
 	// 按层级排序创建：先 MILESTONE，再 TASK，最后 SUBTASK
 	// 这样 parent_task_id 引用时父任务一定已经创建
 	typeOrder := []string{"MILESTONE", "TASK", "SUBTASK"}
 	taskMap := make(map[string]string) // task_code -> task_id
+	var initialActiveTasks []*entity.Task // 收集初始激活的任务
 
 	seq := 0
 	for _, taskType := range typeOrder {
@@ -402,8 +456,24 @@ func (s *TemplateService) CreateProjectFromTemplate(ctx context.Context, input *
 
 			var assigneeID *string
 			if tt.DefaultAssigneeRole != "" {
+				roleLower := strings.ToLower(tt.DefaultAssigneeRole)
+				// 1. 先在 RoleAssignments 中精确匹配
 				if userID, ok := input.RoleAssignments[tt.DefaultAssigneeRole]; ok && userID != "" {
 					assigneeID = &userID
+				} else {
+					// 2. 大小写不敏感匹配 RoleAssignments
+					for k, v := range input.RoleAssignments {
+						if strings.ToLower(k) == roleLower && v != "" {
+							assigneeID = &v
+							break
+						}
+					}
+				}
+				// 3. PM 角色 fallback：兼容 "pm"、"PM"、"项目经理"、"project_manager" 等写法
+				if assigneeID == nil && input.PMID != "" {
+					if roleLower == "pm" || roleLower == "project_manager" || tt.DefaultAssigneeRole == "项目经理" {
+						assigneeID = &input.PMID
+					}
 				}
 			}
 
@@ -426,6 +496,16 @@ func (s *TemplateService) CreateProjectFromTemplate(ctx context.Context, input *
 
 			seq++
 			dates := taskDates[tt.TaskCode]
+
+			// 没有前置依赖的任务直接设为 in_progress
+			initialStatus := "pending"
+			var actualStart *time.Time
+			if !tasksWithDeps[tt.TaskCode] {
+				initialStatus = "in_progress"
+				now := time.Now()
+				actualStart = &now
+			}
+
 			task := &entity.Task{
 				ID:                     uuid.New().String()[:32],
 				ProjectID:              project.ID,
@@ -435,11 +515,12 @@ func (s *TemplateService) CreateProjectFromTemplate(ctx context.Context, input *
 				Title:                  tt.Name,
 				Description:            tt.Description,
 				TaskType:               tt.TaskType,
-				Status:                 "pending",
+				Status:                 initialStatus,
 				Priority:               "medium",
 				AssigneeID:             assigneeID,
 				StartDate:              dates.Start,
 				DueDate:                dates.End,
+				ActualStart:            actualStart,
 				Progress:               0,
 				Sequence:               seq,
 				AutoStart:              true,
@@ -447,6 +528,7 @@ func (s *TemplateService) CreateProjectFromTemplate(ctx context.Context, input *
 				ApprovalType:           tt.ApprovalType,
 				AutoCreateFeishuTask:   tt.AutoCreateFeishuTask,
 				FeishuApprovalCode:     tt.FeishuApprovalCode,
+				DefaultAssigneeRole:    tt.DefaultAssigneeRole,
 				CreatedBy:              createdBy,
 				CreatedAt:              time.Now(),
 				UpdatedAt:              time.Now(),
@@ -456,6 +538,12 @@ func (s *TemplateService) CreateProjectFromTemplate(ctx context.Context, input *
 				return nil, fmt.Errorf("create task %s: %w", tt.TaskCode, err)
 			}
 			taskMap[tt.TaskCode] = task.ID
+
+			// 收集初始激活的任务用于发送通知
+			if initialStatus == "in_progress" {
+				taskCopy := *task
+				initialActiveTasks = append(initialActiveTasks, &taskCopy)
+			}
 		}
 	}
 
@@ -504,6 +592,22 @@ func (s *TemplateService) CreateProjectFromTemplate(ctx context.Context, input *
 				}
 			}
 		}
+	}
+
+	// 异步发送初始激活任务的飞书通知
+	log.Printf("[CreateProjectFromTemplate] projectSvc=%v, initialActiveTasks=%d", s.projectSvc != nil, len(initialActiveTasks))
+	if s.projectSvc != nil && len(initialActiveTasks) > 0 {
+		for _, t := range initialActiveTasks {
+			log.Printf("[CreateProjectFromTemplate] 发送通知: task=%s, assignee=%v", t.ID, t.AssigneeID)
+			go s.projectSvc.notifyTaskActivation(context.Background(), t)
+		}
+	}
+
+	// SSE: 通知前端项目已创建
+	sse.PublishProjectUpdate(project.ID, "project_created")
+	// SSE: 给 PM 发个人事件
+	if input.PMID != "" {
+		sse.PublishUserTaskUpdate(input.PMID, project.ID, "", "project_created")
 	}
 
 	return project, nil

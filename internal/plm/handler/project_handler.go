@@ -506,7 +506,7 @@ func (h *ProjectHandler) CompleteMyTask(c *gin.Context) {
 		return
 	}
 
-	Success(c, gin.H{"message": "任务已完成"})
+	Success(c, gin.H{"message": "任务已提交"})
 }
 
 // ConfirmTask 确认任务
@@ -552,6 +552,49 @@ func (h *ProjectHandler) RejectTask(c *gin.Context) {
 	}
 
 	Success(c, gin.H{"message": "任务已驳回"})
+}
+
+// AssignRoles 批量角色分配
+// POST /api/v1/projects/:id/assign-roles
+func (h *ProjectHandler) AssignRoles(c *gin.Context) {
+	projectID := c.Param("id")
+	if projectID == "" {
+		BadRequest(c, "Project ID is required")
+		return
+	}
+
+	userID := GetUserID(c)
+
+	var req struct {
+		Assignments []struct {
+			Role   string `json:"role"`
+			UserID string `json:"user_id"`
+		} `json:"assignments"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "Invalid request body: "+err.Error())
+		return
+	}
+
+	if len(req.Assignments) == 0 {
+		BadRequest(c, "至少需要一个角色分配")
+		return
+	}
+
+	assignments := make([]service.RoleAssignment, len(req.Assignments))
+	for i, a := range req.Assignments {
+		assignments[i] = service.RoleAssignment{
+			RoleCode: a.Role,
+			UserID:   a.UserID,
+		}
+	}
+
+	if err := h.svc.AssignRoles(c.Request.Context(), projectID, userID, assignments); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"message": "角色分配成功"})
 }
 
 // GetOverdueTasks 获取逾期任务

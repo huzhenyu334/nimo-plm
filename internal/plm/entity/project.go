@@ -105,6 +105,7 @@ type Task struct {
 	ApprovalStatus         string `json:"approval_status" gorm:"size:20"`
 	AutoCreateFeishuTask   bool   `json:"auto_create_feishu_task" gorm:"default:false"`
 	FeishuApprovalCode     string `json:"feishu_approval_code" gorm:"size:100"`
+	DefaultAssigneeRole    string `json:"default_assignee_role" gorm:"size:50"`
 	CreatedBy              string `json:"created_by" gorm:"size:32;not null"`
 	CreatedAt              time.Time  `json:"created_at"`
 	UpdatedAt              time.Time  `json:"updated_at"`
@@ -171,9 +172,8 @@ const (
 const (
 	TaskStatusPending    = "pending"
 	TaskStatusInProgress = "in_progress"
+	TaskStatusSubmitted  = "submitted"
 	TaskStatusCompleted  = "completed"
-	TaskStatusConfirmed  = "confirmed"
-	TaskStatusBlocked    = "blocked"
 	TaskStatusCancelled  = "cancelled"
 )
 

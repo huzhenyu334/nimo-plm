@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
+
+	"strings"
 
 	"github.com/bitfantasy/nimo/internal/plm/entity"
 	"github.com/bitfantasy/nimo/internal/plm/sse"
 	"github.com/bitfantasy/nimo/internal/plm/repository"
+	"github.com/bitfantasy/nimo/internal/shared/feishu"
 	"github.com/google/uuid"
 )
 
@@ -19,6 +23,20 @@ type ProjectService struct {
 	productRepo  *repository.ProductRepository
 	feishuSvc    *FeishuIntegrationService
 	taskFormRepo *repository.TaskFormRepository
+	approvalSvc  *ApprovalService
+	feishuClient *feishu.FeishuClient
+	userRepo     *repository.UserRepository
+}
+
+// SetApprovalService 注入审批服务（避免循环依赖）
+func (s *ProjectService) SetApprovalService(svc *ApprovalService) {
+	s.approvalSvc = svc
+}
+
+// SetFeishuClient 注入飞书客户端（用于发送消息卡片）
+func (s *ProjectService) SetFeishuClient(fc *feishu.FeishuClient, userRepo *repository.UserRepository) {
+	s.feishuClient = fc
+	s.userRepo = userRepo
 }
 
 // NewProjectService 创建项目服务
@@ -216,6 +234,9 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID string, req *
 		}
 	}
 
+	// SSE: 通知前端项目已创建
+	sse.PublishProjectUpdate(project.ID, "project_created")
+
 	return project, nil
 }
 
@@ -251,12 +272,20 @@ func (s *ProjectService) UpdateProject(ctx context.Context, id string, req *Upda
 		return nil, fmt.Errorf("update project: %w", err)
 	}
 
+	// SSE: 通知前端项目已更新
+	sse.PublishProjectUpdate(project.ID, "project_updated")
+
 	return project, nil
 }
 
 // DeleteProject 删除项目
 func (s *ProjectService) DeleteProject(ctx context.Context, id string) error {
-	return s.projectRepo.Delete(ctx, id)
+	if err := s.projectRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	// SSE: 通知前端项目已删除
+	sse.PublishProjectUpdate(id, "project_deleted")
+	return nil
 }
 
 // UpdateProjectStatus 更新项目状态
@@ -276,6 +305,9 @@ func (s *ProjectService) UpdateProjectStatus(ctx context.Context, id string, sta
 	if err := s.projectRepo.Update(ctx, project); err != nil {
 		return nil, fmt.Errorf("update project: %w", err)
 	}
+
+	// SSE: 通知前端项目状态已变更
+	sse.PublishProjectUpdate(project.ID, "status_change")
 
 	return project, nil
 }
@@ -367,7 +399,7 @@ func (s *ProjectService) ListTasks(ctx context.Context, projectID string, page, 
 
 			allCompleted := true
 			for _, dep := range tasks[i].Dependencies {
-				if dep.DependsOnStatus != "completed" && dep.DependsOnStatus != "confirmed" {
+				if dep.DependsOnStatus != "completed" && dep.DependsOnStatus != "submitted" {
 					allCompleted = false
 					break
 				}
@@ -378,6 +410,7 @@ func (s *ProjectService) ListTasks(ctx context.Context, projectID string, page, 
 				tasks[i].Status = "in_progress"
 				tasks[i].ActualStart = &now
 				_ = s.taskRepo.Update(ctx, &tasks[i])
+				go s.notifyTaskActivation(context.Background(), &tasks[i])
 			}
 		}
 	}
@@ -539,6 +572,9 @@ func (s *ProjectService) UpdateTask(ctx context.Context, id string, req *UpdateT
 		return nil, fmt.Errorf("update task: %w", err)
 	}
 
+	// SSE: 通知前端任务已更新
+	sse.PublishTaskUpdate(task.ProjectID, task.ID, "task_updated")
+
 	return task, nil
 }
 
@@ -562,6 +598,8 @@ func (s *ProjectService) UpdateTaskStatus(ctx context.Context, id string, status
 	} else if status == entity.TaskStatusCompleted {
 		task.CompletedAt = &now
 		task.Progress = 100
+	} else if status == entity.TaskStatusSubmitted {
+		// submitted: user has submitted, waiting for PM confirmation
 	}
 
 	task.UpdatedAt = now
@@ -574,7 +612,7 @@ func (s *ProjectService) UpdateTaskStatus(ctx context.Context, id string, status
 	go s.updateProjectProgress(context.Background(), task.ProjectID)
 
 	// SSE: 通知前端任务状态变更
-	go sse.PublishTaskUpdate(task.ProjectID, task.ID, "status_change")
+	sse.PublishTaskUpdate(task.ProjectID, task.ID, "status_change")
 
 	return task, nil
 }
@@ -742,27 +780,200 @@ func (s *ProjectService) CompleteMyTask(ctx context.Context, taskID, userID stri
 		}
 	}
 
-	// 5. 更新任务状态
+	// 5. 处理角色分配（根据表单中的 user 类型字段）
+	s.processRoleAssignment(ctx, task)
+
+	// 6. 如果需要审批，自动创建审批请求
+	if task.RequiresApproval && s.approvalSvc != nil {
+		// 找到项目经理作为审批人
+		project, err := s.projectRepo.FindByID(ctx, task.ProjectID)
+		if err == nil && project.ManagerID != "" {
+			approvalReq := CreateApprovalReq{
+				ProjectID:   task.ProjectID,
+				TaskID:      task.ID,
+				Title:       fmt.Sprintf("任务完成审批: %s", task.Title),
+				Description: fmt.Sprintf("任务 %s 已完成，请审批", task.Code),
+				Type:        "task_review",
+				ReviewerIDs: []string{project.ManagerID},
+				FormData:    entity.JSONB(formData),
+			}
+			if _, err := s.approvalSvc.CreateApproval(ctx, approvalReq, userID); err != nil {
+				return fmt.Errorf("创建审批请求失败: %w", err)
+			}
+			// 任务状态由 CreateApproval 内部设为 reviewing，不再走下面的 submitted
+			return nil
+		}
+	}
+
+	// 7. 更新任务状态为 submitted（等待项目经理确认）
 	now := time.Now()
-	task.Status = entity.TaskStatusCompleted
-	task.CompletedAt = &now
-	task.Progress = 100
+	task.Status = entity.TaskStatusSubmitted
 	task.UpdatedAt = now
 
 	if err := s.taskRepo.Update(ctx, task); err != nil {
 		return fmt.Errorf("更新任务状态失败: %w", err)
 	}
 
-	// 6. 更新项目进度
+	// 8. 更新项目进度
 	go s.updateProjectProgress(context.Background(), task.ProjectID)
 
-	// SSE: 通知前端任务完成
-	go sse.PublishTaskUpdate(task.ProjectID, task.ID, "task_completed")
+	// SSE: 通知前端任务已提交
+	sse.PublishTaskUpdate(task.ProjectID, task.ID, "task_submitted")
 
 	return nil
 }
 
-// ConfirmTask 项目经理确认任务
+// processRoleAssignment 根据任务表单中的用户选择字段，自动写入项目角色分配表
+func (s *ProjectService) processRoleAssignment(ctx context.Context, task *entity.Task) {
+	if s.taskFormRepo == nil {
+		return
+	}
+
+	// 获取最新表单提交
+	submission, err := s.taskFormRepo.FindLatestSubmission(ctx, task.ID)
+	if err != nil || submission == nil {
+		return
+	}
+
+	// 表单数据（JSONB 即 map[string]interface{}）
+	data := map[string]interface{}(submission.Data)
+	if len(data) == 0 {
+		return
+	}
+
+	// 获取表单定义，找到 user 类型的字段
+	form, err := s.taskFormRepo.FindByTaskID(ctx, task.ID)
+	if err != nil || form == nil {
+		return
+	}
+
+	var fields []struct {
+		Key   string `json:"key"`
+		Label string `json:"label"`
+		Type  string `json:"type"`
+	}
+	if err := json.Unmarshal(form.Fields, &fields); err != nil {
+		return
+	}
+
+	// 确定阶段（只需计算一次）
+	phase := "all"
+	if task.PhaseID != nil {
+		phaseObj, err := s.projectRepo.FindPhaseByID(ctx, *task.PhaseID)
+		if err == nil {
+			phase = phaseObj.Phase
+		}
+	}
+
+	assignedBy := ""
+	if task.AssigneeID != nil {
+		assignedBy = *task.AssigneeID
+	}
+
+	// 遍历表单字段，处理 role_assignment 和 user 类型
+	for _, f := range fields {
+		val, ok := data[f.Key]
+		if !ok || val == nil {
+			continue
+		}
+
+		switch f.Type {
+		case "role_assignment":
+			// role_assignment 类型：值是 map[string]string，key=角色名, value=用户ID
+			// 例如 {"硬件工程师": "user_id_1", "项目经理": "user_id_2"}
+			roleMap, ok := val.(map[string]interface{})
+			if !ok {
+				log.Printf("[processRoleAssignment] role_assignment字段值不是map: field=%s", f.Key)
+				continue
+			}
+			for roleCode, userVal := range roleMap {
+				assignedUserID, ok := userVal.(string)
+				if !ok || assignedUserID == "" {
+					continue
+				}
+				assignment := &entity.ProjectRoleAssignment{
+					ID:         uuid.New().String()[:32],
+					ProjectID:  task.ProjectID,
+					Phase:      phase,
+					RoleCode:   roleCode,
+					UserID:     assignedUserID,
+					AssignedBy: assignedBy,
+				}
+				s.taskRepo.UpsertRoleAssignment(ctx, assignment)
+				if err := s.taskRepo.UpdateAssigneeByRole(ctx, task.ProjectID, roleCode, assignedUserID); err != nil {
+					log.Printf("[processRoleAssignment] 更新任务assignee失败 (role=%s): %v", roleCode, err)
+				}
+				log.Printf("[processRoleAssignment] 角色绑定成功: project=%s, role=%s, user=%s", task.ProjectID, roleCode, assignedUserID)
+				// SSE: 通知前端角色已分配
+				sse.PublishTaskUpdate(task.ProjectID, task.ID, "role_assigned")
+			}
+
+		case "user":
+			// user 类型：值是单个用户ID字符串
+			assignedUserID, ok := val.(string)
+			if !ok || assignedUserID == "" {
+				continue
+			}
+			roleCode := f.Key
+			if f.Label != "" && (strings.Contains(roleCode, "_") || len(roleCode) > 20) {
+				roleCode = f.Label
+			}
+			assignment := &entity.ProjectRoleAssignment{
+				ID:         uuid.New().String()[:32],
+				ProjectID:  task.ProjectID,
+				Phase:      phase,
+				RoleCode:   roleCode,
+				UserID:     assignedUserID,
+				AssignedBy: assignedBy,
+			}
+			s.taskRepo.UpsertRoleAssignment(ctx, assignment)
+			if err := s.taskRepo.UpdateAssigneeByRole(ctx, task.ProjectID, roleCode, assignedUserID); err != nil {
+				log.Printf("[processRoleAssignment] 更新任务assignee失败 (role=%s): %v", roleCode, err)
+			}
+			log.Printf("[processRoleAssignment] 角色绑定成功: project=%s, role=%s, user=%s", task.ProjectID, roleCode, assignedUserID)
+			// SSE: 通知前端角色已分配
+			sse.PublishTaskUpdate(task.ProjectID, task.ID, "role_assigned")
+		}
+	}
+}
+
+// AssignRoles 批量角色分配：按 role 更新所有匹配任务的 assignee
+func (s *ProjectService) AssignRoles(ctx context.Context, projectID, assignedBy string, assignments []RoleAssignment) error {
+	// 验证项目存在
+	_, err := s.projectRepo.FindByID(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("项目不存在")
+	}
+
+	for _, a := range assignments {
+		if a.RoleCode == "" || a.UserID == "" {
+			continue
+		}
+
+		// Upsert project_role_assignments
+		assignment := &entity.ProjectRoleAssignment{
+			ID:         uuid.New().String()[:32],
+			ProjectID:  projectID,
+			Phase:      "all",
+			RoleCode:   a.RoleCode,
+			UserID:     a.UserID,
+			AssignedBy: assignedBy,
+		}
+		s.taskRepo.UpsertRoleAssignment(ctx, assignment)
+
+		// 批量更新匹配任务的 assignee_id
+		if err := s.taskRepo.UpdateAssigneeByRole(ctx, projectID, a.RoleCode, a.UserID); err != nil {
+			return fmt.Errorf("更新角色 %s 的任务失败: %w", a.RoleCode, err)
+		}
+	}
+
+	// SSE: 通知前端角色已分配，任务可能更新了 assignee
+	sse.PublishProjectUpdate(projectID, "roles_assigned")
+
+	return nil
+}
+
+// ConfirmTask 项目经理确认任务（通过）
 func (s *ProjectService) ConfirmTask(ctx context.Context, projectID, taskID, userID string) error {
 	// 1. 查找项目，验证 manager_id
 	project, err := s.projectRepo.FindByID(ctx, projectID)
@@ -778,22 +989,143 @@ func (s *ProjectService) ConfirmTask(ctx context.Context, projectID, taskID, use
 	if err != nil {
 		return fmt.Errorf("任务不存在")
 	}
-	if task.Status != entity.TaskStatusCompleted {
-		return fmt.Errorf("只有已完成的任务才能确认，当前状态: %s", task.Status)
+	if task.Status != entity.TaskStatusSubmitted {
+		return fmt.Errorf("只有已提交的任务才能确认，当前状态: %s", task.Status)
 	}
 
-	// 3. 更新状态
-	task.Status = entity.TaskStatusConfirmed
-	task.UpdatedAt = time.Now()
+	// 3. 更新状态为已完成
+	now := time.Now()
+	task.Status = entity.TaskStatusCompleted
+	task.CompletedAt = &now
+	task.Progress = 100
+	task.UpdatedAt = now
 
 	if err := s.taskRepo.Update(ctx, task); err != nil {
 		return fmt.Errorf("更新任务状态失败: %w", err)
 	}
 
+	// 4. 更新项目进度
+	go s.updateProjectProgress(context.Background(), task.ProjectID)
+
 	// SSE: 通知前端任务确认
-	go sse.PublishTaskUpdate(task.ProjectID, task.ID, "task_confirmed")
+	sse.PublishTaskUpdate(task.ProjectID, task.ID, "task_confirmed")
+
+	// 5. 检查并激活依赖此任务的下游任务
+	go s.activateDownstreamTasks(context.Background(), task.ID, task.ProjectID)
 
 	return nil
+}
+
+// notifyTaskActivation 异步发送任务激活飞书消息卡片给责任人
+func (s *ProjectService) notifyTaskActivation(ctx context.Context, task *entity.Task) {
+	log.Printf("[notifyTaskActivation] 开始: task=%s, title=%s", task.ID, task.Title)
+	// 前置检查
+	if s.feishuClient == nil || s.userRepo == nil {
+		log.Printf("[notifyTaskActivation] 跳过: feishuClient=%v, userRepo=%v", s.feishuClient != nil, s.userRepo != nil)
+		return
+	}
+	if task.AssigneeID == nil || *task.AssigneeID == "" {
+		log.Printf("[notifyTaskActivation] 跳过: 无assignee, task=%s", task.ID)
+		return
+	}
+
+	// 查询 assignee 用户信息
+	user, err := s.userRepo.FindByID(ctx, *task.AssigneeID)
+	if err != nil || user.FeishuOpenID == "" {
+		return
+	}
+
+	// 查询项目名称
+	projectName := ""
+	project, err := s.projectRepo.FindByID(ctx, task.ProjectID)
+	if err == nil {
+		projectName = project.Name
+	}
+
+	// 查询阶段名称
+	phaseName := ""
+	if task.PhaseID != nil {
+		phase, err := s.projectRepo.FindPhaseByID(ctx, *task.PhaseID)
+		if err == nil {
+			phaseName = phase.Name
+		}
+	}
+
+	// 截止日期
+	dueDate := "-"
+	if task.DueDate != nil {
+		dueDate = task.DueDate.Format("2006-01-02")
+	}
+
+	// 任务详情链接
+	detailURL := fmt.Sprintf("http://43.134.86.237:8080/projects/%s?task=%s", task.ProjectID, task.ID)
+
+	// 构造卡片并发送
+	card := feishu.NewTaskActivationCard(task.Title, projectName, phaseName, user.Name, dueDate, detailURL)
+	log.Printf("[notifyTaskActivation] 发送卡片: task=%s, user=%s, openID=%s", task.ID, user.Name, user.FeishuOpenID)
+	if err := s.feishuClient.SendUserCard(ctx, user.FeishuOpenID, card); err != nil {
+		log.Printf("[notifyTaskActivation] 发送飞书卡片失败: task=%s, user=%s, err=%v", task.ID, user.Name, err)
+	} else {
+		log.Printf("[notifyTaskActivation] 发送成功: task=%s, user=%s", task.ID, user.Name)
+	}
+}
+
+// activateDownstreamTasks 任务完成后检查并激活依赖此任务的下游任务
+func (s *ProjectService) activateDownstreamTasks(ctx context.Context, completedTaskID, projectID string) {
+	// 查询所有依赖此任务的下游任务
+	downstreamTasks, err := s.taskRepo.ListDependentTasks(ctx, completedTaskID)
+	if err != nil || len(downstreamTasks) == 0 {
+		return
+	}
+
+	for i := range downstreamTasks {
+		if downstreamTasks[i].Status != "pending" {
+			continue
+		}
+
+		// 查询该任务的所有前置依赖
+		deps, err := s.taskRepo.ListDependencies(ctx, downstreamTasks[i].ID)
+		if err != nil || len(deps) == 0 {
+			continue
+		}
+
+		// 收集所有前置任务ID
+		depIDs := make([]string, len(deps))
+		for j, d := range deps {
+			depIDs[j] = d.DependsOnID
+		}
+
+		// 批量查询前置任务状态
+		statusMap, err := s.taskRepo.FindStatusByIDs(ctx, depIDs)
+		if err != nil {
+			continue
+		}
+
+		// 检查是否所有前置都已完成
+		allCompleted := true
+		for _, depID := range depIDs {
+			status := statusMap[depID]
+			if status != "completed" && status != "submitted" {
+				allCompleted = false
+				break
+			}
+		}
+
+		if allCompleted {
+			now := time.Now()
+			downstreamTasks[i].Status = "in_progress"
+			downstreamTasks[i].ActualStart = &now
+			downstreamTasks[i].UpdatedAt = now
+			if err := s.taskRepo.Update(ctx, &downstreamTasks[i]); err == nil {
+				// SSE: 通知前端任务被激活
+				sse.PublishTaskUpdate(projectID, downstreamTasks[i].ID, "task_activated")
+				if downstreamTasks[i].AssigneeID != nil && *downstreamTasks[i].AssigneeID != "" {
+					sse.PublishUserTaskUpdate(*downstreamTasks[i].AssigneeID, projectID, downstreamTasks[i].ID, "task_activated")
+				}
+				go s.notifyTaskActivation(context.Background(), &downstreamTasks[i])
+			}
+		}
+	}
 }
 
 // RejectTask 项目经理驳回任务
@@ -812,8 +1144,8 @@ func (s *ProjectService) RejectTask(ctx context.Context, projectID, taskID, user
 	if err != nil {
 		return fmt.Errorf("任务不存在")
 	}
-	if task.Status != entity.TaskStatusCompleted {
-		return fmt.Errorf("只有已完成的任务才能驳回，当前状态: %s", task.Status)
+	if task.Status != entity.TaskStatusSubmitted {
+		return fmt.Errorf("只有已提交的任务才能驳回，当前状态: %s", task.Status)
 	}
 
 	// 3. 更新状态回 in_progress
@@ -843,7 +1175,7 @@ func (s *ProjectService) RejectTask(ctx context.Context, projectID, taskID, user
 	go s.updateProjectProgress(context.Background(), task.ProjectID)
 
 	// SSE: 通知前端任务驳回
-	go sse.PublishTaskUpdate(task.ProjectID, task.ID, "task_rejected")
+	sse.PublishTaskUpdate(task.ProjectID, task.ID, "task_rejected")
 
 	return nil
 }

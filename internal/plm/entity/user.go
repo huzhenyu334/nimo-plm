@@ -114,3 +114,18 @@ type RolePermission struct {
 func (RolePermission) TableName() string {
 	return "role_permissions"
 }
+
+// TaskRole 任务角色（用于模板任务分配，区别于权限角色 Role）
+type TaskRole struct {
+	ID        string    `json:"id" gorm:"primaryKey;size:36"`
+	Code      string    `json:"code" gorm:"size:50;not null;uniqueIndex"`
+	Name      string    `json:"name" gorm:"size:100;not null"`
+	IsSystem  bool      `json:"is_system" gorm:"not null;default:false"`
+	SortOrder int       `json:"sort_order" gorm:"not null;default:0"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (TaskRole) TableName() string {
+	return "task_roles"
+}

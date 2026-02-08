@@ -104,6 +104,7 @@ func (r *TaskRepository) ListByAssignee(ctx context.Context, userID string, filt
 
 	err := query.
 		Preload("Project").
+		Preload("Assignee").
 		Order("due_date ASC, priority DESC").
 		Find(&tasks).Error
 
@@ -324,6 +325,7 @@ func (r *TaskRepository) ListByAssigneeWithPaging(ctx context.Context, userID st
 	offset := (page - 1) * pageSize
 	err := query.
 		Preload("Project").
+		Preload("Assignee").
 		Order("due_date ASC, priority DESC").
 		Offset(offset).
 		Limit(pageSize).
@@ -372,4 +374,33 @@ func (r *TaskRepository) CalculateProjectProgress(ctx context.Context, projectID
 	}
 
 	return int(result.TotalProgress / result.TotalTasks), nil
+}
+
+// ListDependentTasks 查询依赖指定任务的所有下游任务（即 depends_on_task_id = taskID 的任务）
+func (r *TaskRepository) ListDependentTasks(ctx context.Context, taskID string) ([]entity.Task, error) {
+	var tasks []entity.Task
+	err := r.db.WithContext(ctx).
+		Where("id IN (SELECT task_id FROM task_dependencies WHERE depends_on_task_id = ?)", taskID).
+		Find(&tasks).Error
+	return tasks, err
+}
+
+// UpdateAssigneeByRole 按角色批量更新任务的 assignee_id（大小写不敏感匹配）
+func (r *TaskRepository) UpdateAssigneeByRole(ctx context.Context, projectID, role, userID string) error {
+	return r.db.WithContext(ctx).
+		Model(&entity.Task{}).
+		Where("project_id = ? AND LOWER(default_assignee_role) = LOWER(?)", projectID, role).
+		Update("assignee_id", userID).Error
+}
+
+// UpsertRoleAssignment 插入或更新项目角色分配
+func (r *TaskRepository) UpsertRoleAssignment(ctx context.Context, assignment *entity.ProjectRoleAssignment) error {
+	return r.db.WithContext(ctx).Exec(`
+		INSERT INTO project_role_assignments (id, project_id, phase, role_code, user_id, assigned_by, assigned_at)
+		VALUES (?, ?, ?, ?, ?, ?, NOW())
+		ON CONFLICT (project_id, phase, role_code) DO UPDATE SET
+			user_id = EXCLUDED.user_id,
+			assigned_by = EXCLUDED.assigned_by,
+			assigned_at = NOW()
+	`, assignment.ID, assignment.ProjectID, assignment.Phase, assignment.RoleCode, assignment.UserID, assignment.AssignedBy).Error
 }

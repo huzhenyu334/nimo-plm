@@ -177,6 +177,46 @@ func NewPhaseGateCard(phaseName, projectName string, roles []string) Interactive
 	}
 }
 
+// NewTaskActivationCard 创建任务激活通知卡片（蓝色模板，含查看详情按钮）
+// taskName: 任务名称
+// projectName: 所属项目名称
+// phaseName: 阶段名称
+// assigneeName: 负责人名称
+// dueDate: 截止日期（格式如 "2024-03-15"）
+// detailURL: 任务详情链接
+func NewTaskActivationCard(taskName, projectName, phaseName, assigneeName, dueDate, detailURL string) InteractiveCard {
+	return InteractiveCard{
+		Config: &CardConfig{WideScreenMode: true},
+		Header: &CardHeader{
+			Title:    CardText{Tag: "plain_text", Content: "📋 新任务待处理"},
+			Template: "blue",
+		},
+		Elements: []CardElement{
+			{
+				Tag: "div",
+				Fields: []CardField{
+					{IsShort: true, Text: CardText{Tag: "lark_md", Content: fmt.Sprintf("**项目名称**\n%s", projectName)}},
+					{IsShort: true, Text: CardText{Tag: "lark_md", Content: fmt.Sprintf("**任务名称**\n%s", taskName)}},
+					{IsShort: true, Text: CardText{Tag: "lark_md", Content: fmt.Sprintf("**阶段**\n%s", phaseName)}},
+					{IsShort: true, Text: CardText{Tag: "lark_md", Content: fmt.Sprintf("**截止日期**\n%s", dueDate)}},
+				},
+			},
+			{Tag: "hr"},
+			{
+				Tag: "action",
+				Actions: []CardAction{
+					{
+						Tag:  "button",
+						Text: CardText{Tag: "plain_text", Content: "查看任务详情"},
+						Type: "primary",
+						URL:  detailURL,
+					},
+				},
+			},
+		},
+	}
+}
+
 // NewRollbackCard 创建任务回退通知卡片
 // taskName: 被回退的任务名称
 // reason: 回退原因

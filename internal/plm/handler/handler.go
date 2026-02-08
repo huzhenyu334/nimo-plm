@@ -37,6 +37,8 @@ type Handlers struct {
 	Upload      *UploadHandler
 	// V7 SSE
 	SSE         *SSEHandler
+	// V8 角色
+	Role        *RoleHandler
 }
 
 // NewHandlers 创建处理器集合
