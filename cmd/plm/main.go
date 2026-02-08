@@ -72,7 +72,10 @@ func main() {
 	}
 
 	// 清理旧的唯一索引（EmployeeNo 允许为空，不再需要唯一约束）
+	// 清理所有可能的 employee_no 唯一约束/索引
+	db.Exec("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_employee_no_key")
 	db.Exec("DROP INDEX IF EXISTS idx_users_employee_no")
+	db.Exec("DROP INDEX IF EXISTS users_employee_no_key")
 
 	// 手动添加新列（AutoMigrate 会触发 FK 级联问题，所以用原始 SQL）
 	migrationSQL := []string{
