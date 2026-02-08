@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"time"
-
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/bitfantasy/nimo/internal/plm/entity"
 	"github.com/bitfantasy/nimo/internal/plm/sse"
@@ -1058,7 +1058,9 @@ func (s *ProjectService) notifyTaskActivation(ctx context.Context, task *entity.
 	}
 
 	// 任务详情链接
-	detailURL := fmt.Sprintf("http://43.134.86.237:8080/projects/%s?task=%s", task.ProjectID, task.ID)
+	// 使用飞书 applink 在飞书内置浏览器打开
+	rawURL := fmt.Sprintf("http://43.134.86.237:8080/projects/%s?task=%s", task.ProjectID, task.ID)
+	detailURL := fmt.Sprintf("https://applink.feishu.cn/client/web_url/open?url=%s&mode=window", url.QueryEscape(rawURL))
 
 	// 构造卡片并发送
 	card := feishu.NewTaskActivationCard(task.Title, projectName, phaseName, user.Name, dueDate, detailURL)
