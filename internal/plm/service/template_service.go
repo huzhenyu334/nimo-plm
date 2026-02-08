@@ -17,13 +17,15 @@ import (
 type TemplateService struct {
 	templateRepo *repository.TemplateRepository
 	projectRepo  *repository.ProjectRepository
+	taskFormRepo *repository.TaskFormRepository
 }
 
 // NewTemplateService 创建模板服务
-func NewTemplateService(templateRepo *repository.TemplateRepository, projectRepo *repository.ProjectRepository) *TemplateService {
+func NewTemplateService(templateRepo *repository.TemplateRepository, projectRepo *repository.ProjectRepository, taskFormRepo *repository.TaskFormRepository) *TemplateService {
 	return &TemplateService{
 		templateRepo: templateRepo,
 		projectRepo:  projectRepo,
+		taskFormRepo: taskFormRepo,
 	}
 }
 
@@ -475,6 +477,32 @@ func (s *TemplateService) CreateProjectFromTemplate(ctx context.Context, input *
 
 		if err := s.projectRepo.CreateTaskDependency(ctx, taskDep); err != nil {
 			continue
+		}
+	}
+
+	// 从模板表单创建任务表单
+	if s.taskFormRepo != nil {
+		templateForms, err := s.taskFormRepo.FindTemplateFormsByTemplateID(ctx, input.TemplateID)
+		if err == nil && len(templateForms) > 0 {
+			now := time.Now()
+			for _, tf := range templateForms {
+				actualTaskID, ok := taskMap[tf.TaskCode]
+				if !ok {
+					continue
+				}
+				taskForm := &entity.TaskForm{
+					ID:        uuid.New().String()[:32],
+					TaskID:    actualTaskID,
+					Name:      tf.Name,
+					Fields:    tf.Fields,
+					CreatedBy: createdBy,
+					CreatedAt: now,
+					UpdatedAt: now,
+				}
+				if err := s.taskFormRepo.Create(ctx, taskForm); err != nil {
+					continue // 跳过错误，不阻塞项目创建
+				}
+			}
 		}
 	}
 

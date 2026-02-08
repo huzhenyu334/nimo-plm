@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -12,10 +13,11 @@ import (
 
 // ProjectService 项目服务
 type ProjectService struct {
-	projectRepo *repository.ProjectRepository
-	taskRepo    *repository.TaskRepository
-	productRepo *repository.ProductRepository
-	feishuSvc   *FeishuIntegrationService
+	projectRepo  *repository.ProjectRepository
+	taskRepo     *repository.TaskRepository
+	productRepo  *repository.ProductRepository
+	feishuSvc    *FeishuIntegrationService
+	taskFormRepo *repository.TaskFormRepository
 }
 
 // NewProjectService 创建项目服务
@@ -24,12 +26,14 @@ func NewProjectService(
 	taskRepo *repository.TaskRepository,
 	productRepo *repository.ProductRepository,
 	feishuSvc *FeishuIntegrationService,
+	taskFormRepo *repository.TaskFormRepository,
 ) *ProjectService {
 	return &ProjectService{
-		projectRepo: projectRepo,
-		taskRepo:    taskRepo,
-		productRepo: productRepo,
-		feishuSvc:   feishuSvc,
+		projectRepo:  projectRepo,
+		taskRepo:     taskRepo,
+		productRepo:  productRepo,
+		feishuSvc:    feishuSvc,
+		taskFormRepo: taskFormRepo,
 	}
 }
 
@@ -362,7 +366,7 @@ func (s *ProjectService) ListTasks(ctx context.Context, projectID string, page, 
 
 			allCompleted := true
 			for _, dep := range tasks[i].Dependencies {
-				if dep.DependsOnStatus != "completed" {
+				if dep.DependsOnStatus != "completed" && dep.DependsOnStatus != "confirmed" {
 					allCompleted = false
 					break
 				}
@@ -661,4 +665,172 @@ func (s *ProjectService) GetMyTasks(ctx context.Context, userID string, page, pa
 // GetOverdueTasks 获取逾期任务
 func (s *ProjectService) GetOverdueTasks(ctx context.Context, projectID string) ([]entity.Task, error) {
 	return s.taskRepo.ListOverdue(ctx, projectID)
+}
+
+// CompleteMyTask 工程师完成任务（含表单提交）
+func (s *ProjectService) CompleteMyTask(ctx context.Context, taskID, userID string, formData map[string]interface{}) error {
+	// 1. 查找任务
+	task, err := s.taskRepo.FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("任务不存在")
+	}
+
+	// 2. 验证 assignee
+	if task.AssigneeID == nil || *task.AssigneeID != userID {
+		return fmt.Errorf("只有任务负责人才能完成任务")
+	}
+
+	// 3. 验证状态
+	if task.Status != entity.TaskStatusInProgress {
+		return fmt.Errorf("只有进行中的任务才能完成，当前状态: %s", task.Status)
+	}
+
+	// 4. 检查表单
+	if s.taskFormRepo != nil {
+		form, err := s.taskFormRepo.FindByTaskID(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("查询表单失败: %w", err)
+		}
+
+		if form != nil {
+			// 有表单，必须提交 form_data
+			if formData == nil {
+				return fmt.Errorf("此任务需要填写表单才能完成")
+			}
+
+			// 验证 required 字段
+			var fields []struct {
+				Key      string `json:"key"`
+				Label    string `json:"label"`
+				Required bool   `json:"required"`
+			}
+			if err := json.Unmarshal(form.Fields, &fields); err == nil {
+				for _, f := range fields {
+					if f.Required {
+						val, ok := formData[f.Key]
+						if !ok || val == nil || val == "" {
+							return fmt.Errorf("必填字段 [%s] 未填写", f.Label)
+						}
+					}
+				}
+			}
+
+			// 计算版本号
+			version := 1
+			latestSubmission, _ := s.taskFormRepo.FindLatestSubmission(ctx, taskID)
+			if latestSubmission != nil {
+				version = latestSubmission.Version + 1
+			}
+
+			// 创建提交记录
+			submission := &entity.TaskFormSubmission{
+				ID:          uuid.New().String()[:32],
+				FormID:      form.ID,
+				TaskID:      taskID,
+				Data:        entity.JSONB(formData),
+				SubmittedBy: userID,
+				SubmittedAt: time.Now(),
+				Version:     version,
+			}
+			if err := s.taskFormRepo.CreateSubmission(ctx, submission); err != nil {
+				return fmt.Errorf("保存表单提交失败: %w", err)
+			}
+		}
+	}
+
+	// 5. 更新任务状态
+	now := time.Now()
+	task.Status = entity.TaskStatusCompleted
+	task.CompletedAt = &now
+	task.Progress = 100
+	task.UpdatedAt = now
+
+	if err := s.taskRepo.Update(ctx, task); err != nil {
+		return fmt.Errorf("更新任务状态失败: %w", err)
+	}
+
+	// 6. 更新项目进度
+	go s.updateProjectProgress(context.Background(), task.ProjectID)
+
+	return nil
+}
+
+// ConfirmTask 项目经理确认任务
+func (s *ProjectService) ConfirmTask(ctx context.Context, projectID, taskID, userID string) error {
+	// 1. 查找项目，验证 manager_id
+	project, err := s.projectRepo.FindByID(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("项目不存在")
+	}
+	if project.ManagerID != userID {
+		return fmt.Errorf("只有项目经理才能确认任务")
+	}
+
+	// 2. 查找任务，验证状态
+	task, err := s.taskRepo.FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("任务不存在")
+	}
+	if task.Status != entity.TaskStatusCompleted {
+		return fmt.Errorf("只有已完成的任务才能确认，当前状态: %s", task.Status)
+	}
+
+	// 3. 更新状态
+	task.Status = entity.TaskStatusConfirmed
+	task.UpdatedAt = time.Now()
+
+	if err := s.taskRepo.Update(ctx, task); err != nil {
+		return fmt.Errorf("更新任务状态失败: %w", err)
+	}
+
+	return nil
+}
+
+// RejectTask 项目经理驳回任务
+func (s *ProjectService) RejectTask(ctx context.Context, projectID, taskID, userID, reason string) error {
+	// 1. 查找项目，验证 manager_id
+	project, err := s.projectRepo.FindByID(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("项目不存在")
+	}
+	if project.ManagerID != userID {
+		return fmt.Errorf("只有项目经理才能驳回任务")
+	}
+
+	// 2. 查找任务，验证状态
+	task, err := s.taskRepo.FindByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("任务不存在")
+	}
+	if task.Status != entity.TaskStatusCompleted {
+		return fmt.Errorf("只有已完成的任务才能驳回，当前状态: %s", task.Status)
+	}
+
+	// 3. 更新状态回 in_progress
+	task.Status = entity.TaskStatusInProgress
+	task.CompletedAt = nil
+	task.Progress = 50 // 驳回后重置进度
+	task.UpdatedAt = time.Now()
+
+	if err := s.taskRepo.Update(ctx, task); err != nil {
+		return fmt.Errorf("更新任务状态失败: %w", err)
+	}
+
+	// 4. 添加驳回评论
+	if reason != "" {
+		comment := &entity.TaskComment{
+			ID:        uuid.New().String()[:32],
+			TaskID:    taskID,
+			UserID:    userID,
+			Content:   fmt.Sprintf("[驳回] %s", reason),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		s.taskRepo.AddComment(ctx, comment)
+	}
+
+	// 5. 更新项目进度
+	go s.updateProjectProgress(context.Background(), task.ProjectID)
+
+	return nil
 }

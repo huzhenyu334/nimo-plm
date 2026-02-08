@@ -484,6 +484,76 @@ func (h *ProjectHandler) GetMyTasks(c *gin.Context) {
 	Success(c, result)
 }
 
+// CompleteMyTask 完成我的任务
+// POST /my/tasks/:taskId/complete
+func (h *ProjectHandler) CompleteMyTask(c *gin.Context) {
+	taskID := c.Param("taskId")
+	if taskID == "" {
+		BadRequest(c, "Task ID is required")
+		return
+	}
+
+	userID := GetUserID(c)
+
+	var req struct {
+		FormData map[string]interface{} `json:"form_data"`
+	}
+	// form_data 可选，不 bind required
+	c.ShouldBindJSON(&req)
+
+	if err := h.svc.CompleteMyTask(c.Request.Context(), taskID, userID, req.FormData); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"message": "任务已完成"})
+}
+
+// ConfirmTask 确认任务
+// POST /projects/:id/tasks/:taskId/confirm
+func (h *ProjectHandler) ConfirmTask(c *gin.Context) {
+	projectID := c.Param("id")
+	taskID := c.Param("taskId")
+	if projectID == "" || taskID == "" {
+		BadRequest(c, "Project ID and Task ID are required")
+		return
+	}
+
+	userID := GetUserID(c)
+
+	if err := h.svc.ConfirmTask(c.Request.Context(), projectID, taskID, userID); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"message": "任务已确认"})
+}
+
+// RejectTask 驳回任务
+// POST /projects/:id/tasks/:taskId/reject
+func (h *ProjectHandler) RejectTask(c *gin.Context) {
+	projectID := c.Param("id")
+	taskID := c.Param("taskId")
+	if projectID == "" || taskID == "" {
+		BadRequest(c, "Project ID and Task ID are required")
+		return
+	}
+
+	userID := GetUserID(c)
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	c.ShouldBindJSON(&req)
+
+	if err := h.svc.RejectTask(c.Request.Context(), projectID, taskID, userID, req.Reason); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"message": "任务已驳回"})
+}
+
 // GetOverdueTasks 获取逾期任务
 func (h *ProjectHandler) GetOverdueTasks(c *gin.Context) {
 	projectID := c.Param("id")

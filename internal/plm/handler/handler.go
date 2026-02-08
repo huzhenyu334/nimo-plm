@@ -32,6 +32,9 @@ type Handlers struct {
 	Approval    *ApprovalHandler
 	// V5 审批定义
 	ApprovalDef *ApprovalDefinitionHandler
+	// V6 任务表单 + 文件上传
+	TaskForm    *TaskFormHandler
+	Upload      *UploadHandler
 }
 
 // NewHandlers 创建处理器集合
@@ -52,6 +55,9 @@ func NewHandlers(svc *service.Services, repos *repository.Repositories, cfg *con
 		ProjectBOM:  NewBOMHandler(svc.ProjectBOM),
 		Deliverable: NewDeliverableHandler(repos.Deliverable),
 		Codename:    NewCodenameHandler(repos.Codename),
+		// V6 任务表单 + 文件上传
+		TaskForm:    NewTaskFormHandler(repos.TaskForm, repos.Project),
+		Upload:      NewUploadHandler(),
 	}
 	// V3 工作流
 	if workflowSvc != nil {

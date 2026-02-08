@@ -12,6 +12,7 @@ import (
 
 	"github.com/bitfantasy/nimo/internal/config"
 	"github.com/bitfantasy/nimo/internal/middleware"
+	"github.com/bitfantasy/nimo/internal/plm/entity"
 	"github.com/bitfantasy/nimo/internal/plm/handler"
 	"github.com/bitfantasy/nimo/internal/plm/repository"
 	"github.com/bitfantasy/nimo/internal/plm/service"
@@ -59,6 +60,15 @@ func main() {
 	db, err := initDatabase(cfg.Database)
 	if err != nil {
 		zapLogger.Fatal("Failed to connect to database", zap.Error(err))
+	}
+
+	// AutoMigrate for task form tables
+	if err := db.AutoMigrate(
+		&entity.TaskForm{},
+		&entity.TaskFormSubmission{},
+		&entity.TemplateTaskForm{},
+	); err != nil {
+		zapLogger.Warn("AutoMigrate task form tables warning", zap.Error(err))
 	}
 
 	// 手动添加新列（AutoMigrate 会触发 FK 级联问题，所以用原始 SQL）
@@ -441,6 +451,9 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 		})
 	})
 
+	// 静态文件服务 - 上传文件
+	r.Static("/uploads", "./uploads")
+
 	// 静态文件服务 - 前端
 	r.Static("/assets", "./web/plm/assets")
 	r.StaticFile("/logo.svg", "./web/plm/logo.svg")
@@ -591,6 +604,15 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				projects.DELETE("/:id/tasks/:taskId/dependencies/:depId", h.Project.RemoveTaskDependency)
 				projects.GET("/:id/overdue-tasks", h.Project.GetOverdueTasks)
 
+				// V6: 任务表单
+				projects.GET("/:id/tasks/:taskId/form", h.TaskForm.GetTaskForm)
+				projects.PUT("/:id/tasks/:taskId/form", h.TaskForm.UpsertTaskForm)
+				projects.GET("/:id/tasks/:taskId/form/submission", h.TaskForm.GetFormSubmission)
+
+				// V6: 任务确认/驳回
+				projects.POST("/:id/tasks/:taskId/confirm", h.Project.ConfirmTask)
+				projects.POST("/:id/tasks/:taskId/reject", h.Project.RejectTask)
+
 				// V2: 项目BOM管理
 				projects.GET("/:id/boms", h.ProjectBOM.ListBOMs)
 				projects.POST("/:id/boms", h.ProjectBOM.CreateBOM)
@@ -625,6 +647,10 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 
 			// 我的任务
 			authorized.GET("/my/tasks", h.Project.GetMyTasks)
+			authorized.POST("/my/tasks/:taskId/complete", h.Project.CompleteMyTask)
+
+			// 文件上传
+			authorized.POST("/upload", h.Upload.Upload)
 
 			// ECN管理
 			ecns := authorized.Group("/ecns")
@@ -679,6 +705,10 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				templates.POST("/:id/publish", h.Template.Publish)
 				templates.POST("/:id/upgrade", h.Template.UpgradeVersion)
 				templates.GET("/:id/versions", h.Template.ListVersions)
+
+				// V7: 模板任务表单
+				templates.GET("/:id/task-forms", h.TaskForm.GetTemplateTaskForms)
+				templates.POST("/:id/task-forms", h.TaskForm.SaveTemplateTaskForm)
 			}
 
 			// 从模板创建项目

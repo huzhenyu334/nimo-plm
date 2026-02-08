@@ -206,13 +206,13 @@ func (s *ApprovalService) Approve(ctx context.Context, approvalID, reviewerUserI
 			return fmt.Errorf("更新审批状态失败: %w", err)
 		}
 
-		// 更新关联任务状态: reviewing → completed（如果有关联任务）
+		// 更新关联任务状态: reviewing → confirmed（审批通过自动确认）
 		if approval.TaskID != "" {
 			completedAt := time.Now()
 			result := tx.Model(&entity.Task{}).
 				Where("id = ? AND status = ?", approval.TaskID, entity.TaskStatusReviewing).
 				Updates(map[string]interface{}{
-					"status":     entity.TaskStatusCompleted,
+					"status":     entity.TaskStatusConfirmed,
 					"actual_end": completedAt,
 					"progress":   100,
 					"updated_at": completedAt,
@@ -498,7 +498,7 @@ func (s *ApprovalService) autoStartDependentTasks(ctx context.Context, db *gorm.
 				allCompleted = false
 				break
 			}
-			if depTask.Status != entity.TaskStatusCompleted {
+			if depTask.Status != entity.TaskStatusCompleted && depTask.Status != entity.TaskStatusConfirmed {
 				allCompleted = false
 				break
 			}

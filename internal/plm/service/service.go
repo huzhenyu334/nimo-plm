@@ -50,7 +50,7 @@ func NewServices(repos *repository.Repositories, rdb *redis.Client, cfg *config.
 		}
 	}
 
-	templateSvc := NewTemplateService(repos.Template, repos.Project)
+	templateSvc := NewTemplateService(repos.Template, repos.Project, repos.TaskForm)
 
 	return &Services{
 		Auth:       NewAuthService(repos.User, rdb, cfg),
@@ -58,7 +58,7 @@ func NewServices(repos *repository.Repositories, rdb *redis.Client, cfg *config.
 		Product:    NewProductService(repos.Product, repos.ProductCategory, rdb),
 		Material:   NewMaterialService(repos.Material, repos.MaterialCategory, rdb),
 		BOM:        NewBOMService(repos.BOM, repos.Material, rdb),
-		Project:    NewProjectService(repos.Project, repos.Task, repos.Product, feishuSvc),
+		Project:    NewProjectService(repos.Project, repos.Task, repos.Product, feishuSvc, repos.TaskForm),
 		ECN:        NewECNService(repos.ECN, repos.Product, feishuSvc),
 		Document:   NewDocumentService(repos.Document, repos.DocumentCategory, minioClient, cfg.MinIO.Bucket),
 		Feishu:     feishuSvc,

@@ -172,6 +172,7 @@ const (
 	TaskStatusPending    = "pending"
 	TaskStatusInProgress = "in_progress"
 	TaskStatusCompleted  = "completed"
+	TaskStatusConfirmed  = "confirmed"
 	TaskStatusBlocked    = "blocked"
 	TaskStatusCancelled  = "cancelled"
 )

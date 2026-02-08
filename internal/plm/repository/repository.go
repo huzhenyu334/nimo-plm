@@ -32,6 +32,8 @@ type Repositories struct {
 	ProjectBOM      *ProjectBOMRepository
 	Deliverable     *DeliverableRepository
 	Codename        *CodenameRepository
+	// V6 任务表单
+	TaskForm        *TaskFormRepository
 }
 
 // NewRepositories 创建仓库集合
@@ -56,5 +58,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		ProjectBOM:      NewProjectBOMRepository(db),
 		Deliverable:     NewDeliverableRepository(db),
 		Codename:        NewCodenameRepository(db),
+		// V6 任务表单
+		TaskForm:        NewTaskFormRepository(db),
 	}
 }
