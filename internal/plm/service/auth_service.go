@@ -241,24 +241,39 @@ func (s *AuthService) getFeishuUserInfo(ctx context.Context, userToken string) (
 
 // createOrUpdateUser 创建或更新用户
 func (s *AuthService) createOrUpdateUser(ctx context.Context, feishuUser *FeishuUserInfoResponse) (*entity.User, error) {
-	// 查找已存在的用户
+	// 查找已存在的用户：先按 user_id，再按 open_id
 	user, err := s.userRepo.FindByFeishuUserID(ctx, feishuUser.Data.UserId)
 	if err != nil && err != repository.ErrNotFound {
 		return nil, err
+	}
+	if user == nil && feishuUser.Data.OpenId != "" {
+		user, err = s.userRepo.FindByOpenID(ctx, feishuUser.Data.OpenId)
+		if err != nil && err != repository.ErrNotFound {
+			return nil, err
+		}
 	}
 
 	now := time.Now()
 
 	if user == nil {
 		// 创建新用户
+		email := feishuUser.Data.Email
+		if email == "" {
+			email = fmt.Sprintf("feishu_%s@placeholder.local", feishuUser.Data.OpenId[:15])
+		}
+		username := feishuUser.Data.UserId
+		if username == "" {
+			username = fmt.Sprintf("feishu_%s", feishuUser.Data.OpenId[:15])
+		}
+
 		user = &entity.User{
 			ID:            generateID(),
 			FeishuUserID:  feishuUser.Data.UserId,
 			FeishuUnionID: feishuUser.Data.UnionId,
 			FeishuOpenID:  feishuUser.Data.OpenId,
-			Username:      feishuUser.Data.UserId,
+			Username:      username,
 			Name:          feishuUser.Data.Name,
-			Email:         feishuUser.Data.Email,
+			Email:         email,
 			Mobile:        feishuUser.Data.Mobile,
 			AvatarURL:     feishuUser.Data.AvatarUrl,
 			Status:        "active",
@@ -275,9 +290,20 @@ func (s *AuthService) createOrUpdateUser(ctx context.Context, feishuUser *Feishu
 			// 不阻断流程，只记录错误
 		}
 	} else {
-		// 更新用户信息
+		// 更新用户信息（同时补全之前缺失的飞书字段）
+		if user.FeishuUserID == "" && feishuUser.Data.UserId != "" {
+			user.FeishuUserID = feishuUser.Data.UserId
+		}
+		if user.FeishuOpenID == "" && feishuUser.Data.OpenId != "" {
+			user.FeishuOpenID = feishuUser.Data.OpenId
+		}
+		if user.FeishuUnionID == "" && feishuUser.Data.UnionId != "" {
+			user.FeishuUnionID = feishuUser.Data.UnionId
+		}
 		user.Name = feishuUser.Data.Name
-		user.Email = feishuUser.Data.Email
+		if feishuUser.Data.Email != "" {
+			user.Email = feishuUser.Data.Email
+		}
 		user.Mobile = feishuUser.Data.Mobile
 		user.AvatarURL = feishuUser.Data.AvatarUrl
 		user.LastLoginAt = &now
