@@ -480,6 +480,9 @@ func main() {
 	srmDashboardSvc := srmsvc.NewDashboardService(db)
 	srmHandlers := srmhandler.NewHandlers(srmSupplierSvc, srmProcurementSvc, srmInspectionSvc, srmDashboardSvc, srmRepos.PO)
 
+	// PLM→SRM集成：BOM创建后自动生成打样采购需求
+	services.Project.SetSRMProcurementService(srmProcurementSvc)
+
 	// 设置Gin模式
 	if cfg.Server.Mode == "release" {
 		gin.SetMode(gin.ReleaseMode)

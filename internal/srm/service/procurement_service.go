@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
+	plmentity "github.com/bitfantasy/nimo/internal/plm/entity"
 	"github.com/bitfantasy/nimo/internal/srm/entity"
 	"github.com/bitfantasy/nimo/internal/srm/repository"
 	"github.com/google/uuid"
@@ -241,6 +243,108 @@ func (s *ProcurementService) CreatePRFromBOM(ctx context.Context, projectID, bom
 		return nil, err
 	}
 	return pr, nil
+}
+
+// AutoCreatePRFromBOM 从BOM自动创建打样采购需求（PLM审批通过后调用）
+// 直接读取PLM数据库表获取项目名、BOM信息和BOM行项
+func (s *ProcurementService) AutoCreatePRFromBOM(ctx context.Context, projectID, bomID, userID string) error {
+	// 1. 读取PLM项目信息
+	var project plmentity.Project
+	if err := s.db.WithContext(ctx).Where("id = ?", projectID).First(&project).Error; err != nil {
+		return fmt.Errorf("读取项目信息失败: %w", err)
+	}
+
+	// 2. 读取PLM BOM信息
+	var bom plmentity.ProjectBOM
+	if err := s.db.WithContext(ctx).Where("id = ?", bomID).First(&bom).Error; err != nil {
+		return fmt.Errorf("读取BOM信息失败: %w", err)
+	}
+
+	// 3. 读取BOM行项
+	var bomItems []plmentity.ProjectBOMItem
+	if err := s.db.WithContext(ctx).Where("bom_id = ?", bomID).Order("item_number").Find(&bomItems).Error; err != nil {
+		return fmt.Errorf("读取BOM行项失败: %w", err)
+	}
+	if len(bomItems) == 0 {
+		log.Printf("[SRM] BOM %s 无行项，跳过PR创建", bomID)
+		return nil
+	}
+
+	// 4. 转换为BOMItemInfo并调用已有的CreatePRFromBOM
+	var items []BOMItemInfo
+	for _, bi := range bomItems {
+		materialID := ""
+		if bi.MaterialID != nil {
+			materialID = *bi.MaterialID
+		}
+		items = append(items, BOMItemInfo{
+			MaterialID:    materialID,
+			MaterialCode:  bi.ManufacturerPN,
+			MaterialName:  bi.Name,
+			Specification: bi.Specification,
+			Category:      bi.Category,
+			Quantity:      bi.Quantity,
+			Unit:          bi.Unit,
+		})
+	}
+
+	// 5. 防重复检查
+	existing, err := s.prRepo.FindByBOMID(ctx, bomID)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		log.Printf("[SRM] BOM %s 已有PR %s，跳过", bomID, existing.PRCode)
+		return nil
+	}
+
+	// 6. 生成PR编码
+	code, err := s.prRepo.GenerateCode(ctx)
+	if err != nil {
+		return fmt.Errorf("生成PR编码失败: %w", err)
+	}
+
+	// 7. 创建PR，标题格式: {project_name} - {bom_name} 打样采购
+	title := fmt.Sprintf("%s - %s 打样采购", project.Name, bom.Name)
+	pr := &entity.PurchaseRequest{
+		ID:          uuid.New().String()[:32],
+		PRCode:      code,
+		Title:       title,
+		Type:        entity.PRTypeSample,
+		Priority:    "normal",
+		Status:      entity.PRStatusPending,
+		ProjectID:   &projectID,
+		BOMID:       &bomID,
+		Phase:       bom.BOMType,
+		RequestedBy: userID,
+	}
+
+	for i, item := range items {
+		unit := item.Unit
+		if unit == "" {
+			unit = "pcs"
+		}
+		pr.Items = append(pr.Items, entity.PRItem{
+			ID:            uuid.New().String()[:32],
+			PRID:          pr.ID,
+			MaterialID:    strPtr(item.MaterialID),
+			MaterialCode:  item.MaterialCode,
+			MaterialName:  item.MaterialName,
+			Specification: item.Specification,
+			Category:      item.Category,
+			Quantity:      item.Quantity,
+			Unit:          unit,
+			Status:        entity.PRItemStatusPending,
+			SortOrder:     i + 1,
+		})
+	}
+
+	if err := s.prRepo.Create(ctx, pr); err != nil {
+		return fmt.Errorf("创建打样PR失败: %w", err)
+	}
+
+	log.Printf("[SRM] 自动创建打样PR: %s (项目=%s, BOM=%s, %d项)", pr.PRCode, project.Name, bom.Name, len(items))
+	return nil
 }
 
 // === 采购订单(PO) ===

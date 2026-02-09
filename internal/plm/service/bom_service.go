@@ -1388,7 +1388,8 @@ type ParsedBOMItem struct {
 
 // CreateBOMFromParsedItems 根据已解析的BOM条目创建项目BOM（含自动建料）
 // 用于任务表单中 bom_upload 字段的自动BOM创建
-func (s *ProjectBOMService) CreateBOMFromParsedItems(ctx context.Context, projectID, userID string, bomName string, items []ParsedBOMItem) error {
+// 返回创建的BOM ID和错误
+func (s *ProjectBOMService) CreateBOMFromParsedItems(ctx context.Context, projectID, userID string, bomName string, items []ParsedBOMItem) (string, error) {
 	// 1. 创建 ProjectBOM 记录
 	bom := &entity.ProjectBOM{
 		ID:        uuid.New().String()[:32],
@@ -1402,7 +1403,7 @@ func (s *ProjectBOMService) CreateBOMFromParsedItems(ctx context.Context, projec
 		UpdatedAt: time.Now(),
 	}
 	if err := s.bomRepo.Create(ctx, bom); err != nil {
-		return fmt.Errorf("create project bom: %w", err)
+		return "", fmt.Errorf("create project bom: %w", err)
 	}
 
 	// 2. 为每个条目创建 BOM Item + 自动建料
@@ -1466,13 +1467,13 @@ func (s *ProjectBOMService) CreateBOMFromParsedItems(ctx context.Context, projec
 	// 3. 批量插入BOM行项
 	if len(entities) > 0 {
 		if err := s.bomRepo.BatchCreateItems(ctx, entities); err != nil {
-			return fmt.Errorf("batch create bom items: %w", err)
+			return "", fmt.Errorf("batch create bom items: %w", err)
 		}
 		// 更新BOM总数和成本
 		s.updateBOMCost(ctx, bom.ID)
 	}
 
-	return nil
+	return bom.ID, nil
 }
 
 // ---- Phase 2/3/4 DTOs ----

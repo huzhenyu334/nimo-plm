@@ -27,6 +27,10 @@ type ProjectService struct {
 	feishuClient *feishu.FeishuClient
 	userRepo     *repository.UserRepository
 	bomSvc       *ProjectBOMService
+	// SRM集成：BOM创建后自动生成打样采购需求
+	srmProcurementSvc interface {
+		AutoCreatePRFromBOM(ctx context.Context, projectID, bomID, userID string) error
+	}
 }
 
 // SetApprovalService 注入审批服务（避免循环依赖）
@@ -43,6 +47,13 @@ func (s *ProjectService) SetBOMService(svc *ProjectBOMService) {
 func (s *ProjectService) SetFeishuClient(fc *feishu.FeishuClient, userRepo *repository.UserRepository) {
 	s.feishuClient = fc
 	s.userRepo = userRepo
+}
+
+// SetSRMProcurementService 注入SRM采购服务（BOM创建后自动生成打样PR）
+func (s *ProjectService) SetSRMProcurementService(svc interface {
+	AutoCreatePRFromBOM(ctx context.Context, projectID, bomID, userID string) error
+}) {
+	s.srmProcurementSvc = svc
 }
 
 // NewProjectService 创建项目服务
@@ -907,8 +918,16 @@ func (s *ProjectService) ProcessBOMUploadFields(ctx context.Context, form *entit
 			bomName = "BOM from task form"
 		}
 
-		if err := s.bomSvc.CreateBOMFromParsedItems(ctx, projectID, userID, bomName, parsedItems); err != nil {
+		bomID, err := s.bomSvc.CreateBOMFromParsedItems(ctx, projectID, userID, bomName, parsedItems)
+		if err != nil {
 			log.Printf("[WARN] processBOMUploadFields: auto-create BOM failed for field %q: %v", f.Key, err)
+			continue
+		}
+		// BOM创建成功后，自动创建SRM打样采购需求
+		if s.srmProcurementSvc != nil && bomID != "" {
+			if err := s.srmProcurementSvc.AutoCreatePRFromBOM(ctx, projectID, bomID, userID); err != nil {
+				log.Printf("[WARN] auto-create SRM PR failed for BOM %s: %v", bomID, err)
+			}
 		}
 	}
 }
