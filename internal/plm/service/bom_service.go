@@ -625,7 +625,9 @@ func (s *ProjectBOMService) ImportBOM(ctx context.Context, bomID string, f *exce
 		} else {
 			// 自动创建物料
 			newMat, createErr := s.autoCreateMaterial(ctx, item.Name, item.Specification, item.Category, item.Manufacturer, item.ManufacturerPN)
-			if createErr == nil && newMat != nil {
+			if createErr != nil {
+				fmt.Printf("[WARN] auto-create material failed for %q: %v\n", item.Name, createErr)
+			} else if newMat != nil {
 				item.MaterialID = &newMat.ID
 				result.AutoCreated++
 			}
@@ -771,7 +773,9 @@ func (s *ProjectBOMService) ImportPADSBOM(ctx context.Context, bomID string, rea
 		} else {
 			// 自动创建物料
 			newMat, createErr := s.autoCreateMaterial(ctx, item.Name, componentName, category, manufacturer, manufacturerPN)
-			if createErr == nil && newMat != nil {
+			if createErr != nil {
+				fmt.Printf("[WARN] auto-create material failed for %q: %v\n", item.Name, createErr)
+			} else if newMat != nil {
 				item.MaterialID = &newMat.ID
 				result.AutoCreated++
 			}
@@ -1155,7 +1159,7 @@ func (s *ProjectBOMService) autoCreateMaterial(ctx context.Context, name, specif
 		Status:      "active",
 		Unit:        "pcs",
 		Description: specification,
-		CreatedBy:   "system",
+		CreatedBy:   "u_admin",
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
