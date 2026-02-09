@@ -1,7 +1,8 @@
 # nimo SRM 供应商与采购管理系统 PRD
 
-> 版本: v1.0 | 作者: Lyra | 日期: 2026-02-09
+> 版本: v1.1 | 作者: Lyra | 日期: 2026-02-09
 > 状态: 待评审
+> v1.1更新: 融入数据驱动、业务闭环、风险预警设计理念；增加三单匹配、TCO模型、质量闭环、SRM/ERP分工原则
 
 ---
 
@@ -25,7 +26,36 @@ nimo智能眼镜产品研发涉及大量零部件（结构件、电子元器件�
 3. **与PLM无缝衔接**（BOM发布自动触发采购需求，检验结果回写PLM）
 4. **为ERP量产采购打基础**（供应商和价格数据复用）
 
-### 1.3 用户角色
+### 1.3 设计原则
+
+**三大底层逻辑：**
+
+1. **数据驱动** — 供应商选择不靠感觉，靠360画像（交期达成率、来料合格率、价格竞争力、配合度评分）自动排名推荐
+2. **业务闭环** — 每个采购动作都有始有终：需求→寻源→下单→到货→检验→对账，任何断环都有预警
+3. **风险预警** — 交期超期自动提醒、来料不良率超阈值自动触发改进、供应商经营异常标记
+
+**SRM与ERP的分工原则：**
+
+> **SRM算账，ERP记账。**
+
+| 维度 | SRM（外部协同） | ERP（内部管控） |
+|---|---|---|
+| 核心职能 | 和供应商达成共识 | 企业内部财务记账 |
+| 对账 | 三单匹配（PO+入库+对账单），双方确认 | 接收SRM确认后的数据，生成财务凭证 |
+| 价格 | 管合同价、报价、比价 | 管成本核算、应付账款 |
+| 供应商 | 管档案、评价、协同 | 只存编码和付款信息 |
+
+**三单匹配校验逻辑（贯穿系统设计）：**
+
+```
+采购订单(PO): 买了什么？多少钱？
+收货入库单(GR): 收了多少？有没有问题？
+对账单(Settlement): 最终结多少钱？（扣除退货、品质扣款等）
+```
+
+三单匹配通过 → 生成结算清单 → 供应商开票 → 推送ERP记账
+
+### 1.4 用户角色
 
 | 角色 | 职责 |
 |---|---|
@@ -147,7 +177,13 @@ SRM系统
 │   ├── 检验报告
 │   └── 结果回写PLM
 │
-└── M6: 看板与报表
+├── M6: 对账与结算
+│   ├── 自动对账（三单匹配：PO + 入库 + 扣款）
+│   ├── 对账差异处理（在线申诉）
+│   ├── 结算清单生成
+│   └── 推送ERP记账
+│
+└── M7: 看板与报表
     ├── 打样进度看板（按项目/阶段）
     ├── 供应商绩效看板
     └── 采购统计
@@ -189,6 +225,18 @@ CREATE TABLE srm_suppliers (
     bank_account    VARCHAR(50),
     tax_id          VARCHAR(50),                    -- 税号
     payment_terms   VARCHAR(100),                   -- 付款条件（如NET30）
+    
+    -- 360画像标签
+    tags            JSONB,                          -- 自定义标签 ["响应快","价格有优势","技术能力强"]
+    tech_capability VARCHAR(20),                    -- 技术能力: low/medium/high/expert
+    cooperation     VARCHAR(20),                    -- 配合度: poor/fair/good/excellent
+    capacity_limit  VARCHAR(200),                   -- 产能上限描述
+    
+    -- 自动计算的绩效指标（定期更新）
+    quality_score   DECIMAL(5,2),                   -- 来料合格率 (0-100)
+    delivery_score  DECIMAL(5,2),                   -- 交期达成率 (0-100)
+    price_score     DECIMAL(5,2),                   -- 价格竞争力 (0-100)
+    overall_score   DECIMAL(5,2),                   -- 综合评分 (加权平均)
     
     -- 管理信息
     created_by      VARCHAR(32) REFERENCES users(id),
@@ -393,11 +441,21 @@ CREATE TABLE srm_quotations (
 );
 ```
 
-#### 3.4.2 比价与定源
+#### 3.4.2 比价与定源（TCO总拥有成本模型）
 
-采购员收集报价后，在比价页面对比：
+不只看单价，用**总拥有成本(TCO)**模型做决策：
+
+```
+TCO = 单价×数量 + 模具费分摊 + 物流成本 + 账期资金占用成本
+
+模具费分摊 = 模具费 ÷ 预估总用量（EVT+DVT+PVT+MP首批）
+账期资金占用 = 总金额 × 年利率 × 账期天数 ÷ 365
+```
+
+比价页面展示：
 - 各供应商的单价、交期、MOQ、模具费
-- 系统自动计算综合成本（单价×数量+模具费分摊）
+- **系统自动计算TCO**，按TCO排序推荐
+- 同时展示供应商360画像评分（质量/交期/配合度）
 - 采购员选定供应商，标记 `is_selected = true`
 - 如果金额超过阈值，需要审批
 
@@ -508,18 +566,118 @@ CREATE TABLE srm_inspections (
 ```
 检验通过 → 更新PR行项状态为 completed → 回写PLM物料验证状态
 检验不通过 → 退货/让步接收
+           → 自动发起8D改进单（通知供应商）
            → 通知研发工程师
            → 如需修改设计 → 触发PLM ECN流程
 ```
 
-#### 3.6.2 回写PLM
+#### 3.6.2 质量闭环（8D改进）
+
+```sql
+-- 8D改进单
+CREATE TABLE srm_corrective_actions (
+    id              VARCHAR(32) PRIMARY KEY,
+    ca_code         VARCHAR(32) UNIQUE NOT NULL,    -- 8D-2026-001
+    inspection_id   VARCHAR(32) REFERENCES srm_inspections(id),
+    supplier_id     VARCHAR(32) REFERENCES srm_suppliers(id),
+    
+    -- 问题描述
+    problem_desc    TEXT NOT NULL,
+    severity        VARCHAR(20),                    -- critical/major/minor
+    
+    -- 8D流程
+    status          VARCHAR(20) DEFAULT 'open',     -- open/responded/verified/closed
+    root_cause      TEXT,                           -- 供应商填：根本原因
+    corrective_action TEXT,                         -- 供应商填：纠正措施
+    preventive_action TEXT,                         -- 供应商填：预防措施
+    
+    -- 时间要求
+    response_deadline TIMESTAMP,                    -- 回复截止时间
+    responded_at    TIMESTAMP,
+    verified_at     TIMESTAMP,
+    closed_at       TIMESTAMP,
+    
+    created_by      VARCHAR(32) REFERENCES users(id),
+    created_at      TIMESTAMP DEFAULT NOW(),
+    updated_at      TIMESTAMP DEFAULT NOW()
+);
+```
+
+**闭环逻辑：**
+- 检验不通过 → 自动创建8D改进单 → 飞书通知供应商（如有门户）
+- 供应商超期未回复 → 系统标记预警，限制该供应商的新PO创建
+- 改进措施验证通过 → 解除限制，更新供应商质量评分
+- 同一供应商累计3次不良 → 自动降级（优选→合格→潜在）
+
+#### 3.6.3 回写PLM
 
 检验完成后，SRM自动回写PLM：
 - 更新 `project_bom_items` 的验证状态字段
 - 更新 `materials` 表的验证信息
 - 关联检验报告到PLM项目文档
 
-### 3.7 M6: 看板与报表
+### 3.7 M6: 对账与结算
+
+```sql
+-- 对账单
+CREATE TABLE srm_settlements (
+    id              VARCHAR(32) PRIMARY KEY,
+    settlement_code VARCHAR(32) UNIQUE NOT NULL,    -- STL-2026-001
+    supplier_id     VARCHAR(32) REFERENCES srm_suppliers(id),
+    period_start    DATE,                           -- 对账周期开始
+    period_end      DATE,                           -- 对账周期结束
+    status          VARCHAR(20) DEFAULT 'draft',    -- draft/confirmed/invoiced/paid
+    
+    -- 金额
+    po_amount       DECIMAL(15,2),                  -- PO总金额
+    received_amount DECIMAL(15,2),                  -- 实收金额（按实际收货数量）
+    deduction       DECIMAL(15,2) DEFAULT 0,        -- 扣款（品质扣款、退货等）
+    final_amount    DECIMAL(15,2),                  -- 最终结算金额
+    currency        VARCHAR(10) DEFAULT 'CNY',
+    
+    -- 发票
+    invoice_no      VARCHAR(100),
+    invoice_amount  DECIMAL(15,2),
+    invoice_url     VARCHAR(500),
+    
+    -- 确认
+    confirmed_by_buyer   BOOLEAN DEFAULT false,
+    confirmed_by_supplier BOOLEAN DEFAULT false,
+    confirmed_at    TIMESTAMP,
+    
+    created_by      VARCHAR(32) REFERENCES users(id),
+    created_at      TIMESTAMP DEFAULT NOW(),
+    updated_at      TIMESTAMP DEFAULT NOW(),
+    notes           TEXT
+);
+
+-- 对账差异记录
+CREATE TABLE srm_settlement_disputes (
+    id              VARCHAR(32) PRIMARY KEY,
+    settlement_id   VARCHAR(32) REFERENCES srm_settlements(id),
+    dispute_type    VARCHAR(50),                    -- price_diff/quantity_diff/quality_deduction/other
+    description     TEXT,
+    amount_diff     DECIMAL(12,2),
+    status          VARCHAR(20) DEFAULT 'open',     -- open/resolved
+    resolution      TEXT,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+```
+
+**对账流程：**
+```
+月末/按需 → 系统自动生成对账单（拉取该供应商本期所有已收货PO）
+    ↓
+三单匹配：PO金额 vs 入库数量×单价 vs 品质扣款
+    ↓
+差异标记（如有）→ 在线沟通解决
+    ↓
+双方确认 → 供应商开票 → 结算清单推送ERP
+    ↓
+ERP生成应付凭证 → 排款支付
+```
+
+### 3.8 M7: 看板与报表
 
 #### 3.7.1 打样进度看板（核心页面）
 
@@ -702,22 +860,39 @@ Step 6: 项目经理在PLM看板查看：所有零件打样验证进度
 - [ ] 检验结果回写PLM
 - [ ] 飞书通知集成
 
-### Phase 3: 高级功能（2周）
+### Phase 3: 质量闭环 + 对账（2周）
+**目标**：品质管控和财务协同
+
+- [ ] 8D改进单管理（检验不通过自动触发）
+- [ ] 供应商限制逻辑（未回复8D→限制下单）
+- [ ] 自动对账（三单匹配）
+- [ ] 对账差异处理
+- [ ] 结算清单生成
+
+### Phase 4: 高级功能（2周）
 **目标**：提升管理效率
 
 - [ ] 供应商准入审批流程
-- [ ] 供应商绩效评分
+- [ ] 供应商绩效自动评分（质量/交期/价格加权）
 - [ ] 交期预警（自动检测即将超期的PO）
-- [ ] 采购审批（金额阈值）
+- [ ] TCO总拥有成本比价模型
 - [ ] 报表导出
 
-### Phase 4: ERP衔接（后续）
+### Phase 5: ERP衔接（后续）
 **目标**：量产切换
 
+- [ ] 结算清单推送ERP生成应付凭证
 - [ ] 供应商数据同步到ERP
 - [ ] 打样价格转量产合同价
 - [ ] 量产PO在ERP中管理
 - [ ] 库存联动
+
+### 未来可扩展（暂不实施）
+- 天眼查/企查查API风险监控（供应商规模扩大后）
+- 供应商自助门户（供应商自己报价、查看PO、回复8D）
+- JIT/VMI协同（量产后）
+- 供应链金融/动态贴现（体量达到后）
+- 条码/PDA联动（建立仓库后）
 
 ---
 
