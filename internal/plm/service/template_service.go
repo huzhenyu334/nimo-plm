@@ -134,6 +134,7 @@ func (s *TemplateService) DuplicateTemplate(ctx context.Context, id string, newC
 			AutoCreateFeishuTask: task.AutoCreateFeishuTask,
 			FeishuApprovalCode:   task.FeishuApprovalCode,
 			SortOrder:            task.SortOrder,
+			IsLocked:             task.IsLocked,
 			CreatedAt:            time.Now(),
 			UpdatedAt:            time.Now(),
 		}
@@ -547,6 +548,7 @@ func (s *TemplateService) CreateProjectFromTemplate(ctx context.Context, input *
 				ActualStart:            actualStart,
 				Progress:               0,
 				Sequence:               seq,
+				IsLocked:               tt.IsLocked,
 				AutoStart:              true,
 				RequiresApproval:       tt.RequiresApproval,
 				ApprovalType:           tt.ApprovalType,

@@ -428,6 +428,10 @@ func (s *ProjectService) ListTasks(ctx context.Context, projectID string, page, 
 				tasks[i].ActualStart = &now
 				_ = s.taskRepo.Update(ctx, &tasks[i])
 				go s.notifyTaskActivation(context.Background(), &tasks[i])
+				// SRM采购任务激活时，自动关联SRM项目
+				if tasks[i].TaskType == entity.TaskTypeSRMProcurement {
+					go s.linkSRMProjectToTask(context.Background(), &tasks[i])
+				}
 			}
 		}
 	}
@@ -924,24 +928,21 @@ func (s *ProjectService) ProcessBOMUploadFields(ctx context.Context, form *entit
 			continue
 		}
 		// BOM创建成功后，自动创建SRM打样采购需求
+		// 注意：不再创建PLM采购跟踪任务，该任务由模板自动生成并通过依赖链激活
 		if s.srmProcurementSvc != nil && bomID != "" {
 			srmPRID, err := s.srmProcurementSvc.AutoCreatePRFromBOM(ctx, projectID, bomID, userID)
 			if err != nil {
 				log.Printf("[WARN] auto-create SRM PR failed for BOM %s: %v", bomID, err)
 			} else if srmPRID != "" {
-				// SRM PR创建成功，自动创建PLM采购跟踪任务
-				var phaseID *string
-				if task, err := s.taskRepo.FindByID(ctx, form.TaskID); err == nil && task != nil {
-					phaseID = task.PhaseID
-				}
-				s.CreateSRMProcurementTask(ctx, projectID, phaseID, srmPRID, userID)
+				log.Printf("[SRM] SRM PR created: project=%s, bom=%s, srm_pr=%s (task linking deferred to dependency activation)", projectID, bomID, srmPRID)
 			}
 		}
 	}
 }
 
 // CreateSRMProcurementTask 自动创建SRM采购跟踪任务
-// 在BOM审批通过后、SRM PR创建成功后调用
+// Deprecated: SRM采购任务现在由模板自动生成，通过依赖链激活后自动关联SRM项目。
+// 保留此方法以兼容非模板创建的项目。
 func (s *ProjectService) CreateSRMProcurementTask(ctx context.Context, projectID string, phaseID *string, srmPRID, userID string) {
 	// 生成任务编码
 	code, err := s.taskRepo.GenerateCode(ctx, projectID)
@@ -1349,7 +1350,51 @@ func (s *ProjectService) activateDownstreamTasks(ctx context.Context, completedT
 					sse.PublishUserTaskUpdate(*downstreamTasks[i].AssigneeID, projectID, downstreamTasks[i].ID, "task_activated")
 				}
 				go s.notifyTaskActivation(context.Background(), &downstreamTasks[i])
+
+				// SRM采购任务激活时，自动关联SRM项目
+				if downstreamTasks[i].TaskType == entity.TaskTypeSRMProcurement {
+					go s.linkSRMProjectToTask(context.Background(), &downstreamTasks[i])
+				}
 			}
+		}
+	}
+}
+
+// linkSRMProjectToTask 将SRM采购任务与最近创建的SRM项目关联
+// 当模板中的SRM采购任务通过依赖链被激活时调用
+func (s *ProjectService) linkSRMProjectToTask(ctx context.Context, task *entity.Task) {
+	db := s.projectRepo.DB()
+
+	var srmProjectID string
+	err := db.Table("srm_projects").
+		Where("plm_project_id = ?", task.ProjectID).
+		Order("created_at DESC").
+		Limit(1).
+		Pluck("id", &srmProjectID).Error
+
+	if err != nil || srmProjectID == "" {
+		log.Printf("[SRM] No SRM project found for PLM project %s, skipping link for task %s", task.ProjectID, task.ID)
+		return
+	}
+
+	// 更新任务的 linked_srm_project_id
+	if err := db.Model(&entity.Task{}).
+		Where("id = ?", task.ID).
+		Update("linked_srm_project_id", srmProjectID).Error; err != nil {
+		log.Printf("[SRM] Failed to link task %s to SRM project %s: %v", task.ID, srmProjectID, err)
+		return
+	}
+
+	log.Printf("[SRM] Linked PLM task %s to SRM project %s", task.ID, srmProjectID)
+
+	// 同时为SRM任务分配采购角色负责人（如果尚未分配）
+	if task.AssigneeID == nil || *task.AssigneeID == "" {
+		assignment, err := s.taskRepo.FindRoleAssignment(ctx, task.ProjectID, "采购")
+		if err == nil && assignment != nil {
+			db.Model(&entity.Task{}).
+				Where("id = ?", task.ID).
+				Update("assignee_id", assignment.UserID)
+			log.Printf("[SRM] Auto-assigned 采购 role user %s to task %s", assignment.UserID, task.ID)
 		}
 	}
 }

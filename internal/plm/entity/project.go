@@ -100,6 +100,7 @@ type Task struct {
 	Path           string     `json:"path" gorm:"size:512"`
 	// SRM桥接
 	LinkedSRMProjectID *string `json:"linked_srm_project_id" gorm:"size:32"`
+	IsLocked           bool    `json:"is_locked" gorm:"default:false"`
 
 	// 新增字段
 	AutoStart              bool   `json:"auto_start" gorm:"default:false"`

@@ -54,6 +54,7 @@ type TemplateTask struct {
 	AutoCreateFeishuTask  bool            `json:"auto_create_feishu_task" gorm:"default:false"`
 	FeishuApprovalCode    string          `json:"feishu_approval_code" gorm:"size:100"`
 	SortOrder             int             `json:"sort_order" gorm:"default:0"`
+	IsLocked              bool            `json:"is_locked" gorm:"default:false"`
 	CreatedAt             time.Time       `json:"created_at"`
 	UpdatedAt             time.Time       `json:"updated_at"`
 

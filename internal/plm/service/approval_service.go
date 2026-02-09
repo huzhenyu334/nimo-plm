@@ -566,6 +566,12 @@ func (s *ApprovalService) autoStartDependentTasks(ctx context.Context, db *gorm.
 					time.Sleep(2 * time.Second)
 					s.projectSvc.notifyTaskActivation(context.Background(), &taskCopy)
 				}()
+
+				// SRM采购任务激活时，自动关联SRM项目
+				if task.TaskType == entity.TaskTypeSRMProcurement {
+					taskCopy2 := task
+					go s.projectSvc.linkSRMProjectToTask(context.Background(), &taskCopy2)
+				}
 			}
 		}
 	}
