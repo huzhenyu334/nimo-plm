@@ -788,8 +788,7 @@ func (s *ProjectService) CompleteMyTask(ctx context.Context, taskID, userID stri
 		}
 	}
 
-	// 5. 处理角色分配（根据表单中的 user 类型字段）
-	s.processRoleAssignment(ctx, task)
+	// 5. 角色分配和BOM创建在审批通过或项目经理确认后执行，提交时不处理
 
 	// 6. 如果需要审批，自动创建审批请求
 	if task.RequiresApproval && s.approvalSvc != nil {
@@ -1127,10 +1126,15 @@ func (s *ProjectService) ConfirmTask(ctx context.Context, projectID, taskID, use
 		return fmt.Errorf("更新任务状态失败: %w", err)
 	}
 
-	// 4. 确认时处理 bom_upload 字段 → 创建项目BOM（无审批的任务走这条路径）
-	if s.bomSvc != nil && s.taskFormRepo != nil {
-		go func() {
-			bgCtx := context.Background()
+	// 4. 确认时处理表单副作用（无审批的任务走这条路径）
+	//    - bom_upload → 创建项目BOM
+	//    - role_assignment / user → 角色绑定
+	go func() {
+		bgCtx := context.Background()
+		// 角色绑定
+		s.processRoleAssignment(bgCtx, task)
+		// BOM创建
+		if s.bomSvc != nil && s.taskFormRepo != nil {
 			form, ferr := s.taskFormRepo.FindByTaskID(bgCtx, taskID)
 			if ferr != nil || form == nil {
 				return
@@ -1141,8 +1145,8 @@ func (s *ProjectService) ConfirmTask(ctx context.Context, projectID, taskID, use
 			}
 			formData := map[string]interface{}(submission.Data)
 			s.ProcessBOMUploadFields(bgCtx, form, formData, task.ProjectID, userID)
-		}()
-	}
+		}
+	}()
 
 	// 5. 更新项目进度
 	go s.updateProjectProgress(context.Background(), task.ProjectID)

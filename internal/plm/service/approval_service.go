@@ -233,21 +233,28 @@ func (s *ApprovalService) Approve(ctx context.Context, approvalID, reviewerUserI
 			}
 		}
 
-		// 审批通过后，处理表单中的 bom_upload 字段 → 自动创建项目BOM
-		if approval.TaskID != "" && s.projectSvc != nil && s.projectSvc.bomSvc != nil && s.projectSvc.taskFormRepo != nil {
+		// 审批通过后，处理表单副作用（BOM创建 + 角色绑定等）
+		if approval.TaskID != "" && s.projectSvc != nil {
 			go func() {
 				bgCtx := context.Background()
-				form, ferr := s.projectSvc.taskFormRepo.FindByTaskID(bgCtx, approval.TaskID)
-				if ferr != nil || form == nil {
-					return
+				// 获取任务用于角色绑定
+				var taskEntity entity.Task
+				if err := s.db.Where("id = ?", approval.TaskID).First(&taskEntity).Error; err == nil {
+					s.projectSvc.processRoleAssignment(bgCtx, &taskEntity)
 				}
-				// 获取最新的表单提交数据
-				submission, serr := s.projectSvc.taskFormRepo.FindLatestSubmission(bgCtx, approval.TaskID)
-				if serr != nil || submission == nil {
-					return
+				// BOM创建
+				if s.projectSvc.bomSvc != nil && s.projectSvc.taskFormRepo != nil {
+					form, ferr := s.projectSvc.taskFormRepo.FindByTaskID(bgCtx, approval.TaskID)
+					if ferr != nil || form == nil {
+						return
+					}
+					submission, serr := s.projectSvc.taskFormRepo.FindLatestSubmission(bgCtx, approval.TaskID)
+					if serr != nil || submission == nil {
+						return
+					}
+					formData := map[string]interface{}(submission.Data)
+					s.projectSvc.ProcessBOMUploadFields(bgCtx, form, formData, approval.ProjectID, approval.RequestedBy)
 				}
-				formData := map[string]interface{}(submission.Data)
-				s.projectSvc.ProcessBOMUploadFields(bgCtx, form, formData, approval.ProjectID, approval.RequestedBy)
 			}()
 		}
 
