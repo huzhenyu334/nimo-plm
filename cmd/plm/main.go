@@ -18,6 +18,10 @@ import (
 	"github.com/bitfantasy/nimo/internal/plm/service"
 	"github.com/bitfantasy/nimo/internal/shared/engine"
 	"github.com/bitfantasy/nimo/internal/shared/feishu"
+	srmentity "github.com/bitfantasy/nimo/internal/srm/entity"
+	srmhandler "github.com/bitfantasy/nimo/internal/srm/handler"
+	srmrepo "github.com/bitfantasy/nimo/internal/srm/repository"
+	srmsvc "github.com/bitfantasy/nimo/internal/srm/service"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
@@ -449,6 +453,33 @@ func main() {
 	handlers.Routing = handler.NewRoutingHandler(routingSvc)
 	workflowSvc.SetRoutingService(routingSvc)
 
+	// === SRM模块初始化 ===
+	// AutoMigrate SRM实体
+	if err := db.AutoMigrate(
+		&srmentity.Supplier{},
+		&srmentity.SupplierContact{},
+		&srmentity.SupplierMaterial{},
+		&srmentity.PurchaseRequest{},
+		&srmentity.PRItem{},
+		&srmentity.PurchaseOrder{},
+		&srmentity.POItem{},
+		&srmentity.Inspection{},
+		&srmentity.CorrectiveAction{},
+		&srmentity.Settlement{},
+		&srmentity.SettlementDispute{},
+	); err != nil {
+		zapLogger.Warn("AutoMigrate SRM tables warning", zap.Error(err))
+	}
+	zapLogger.Info("SRM database migration completed")
+
+	// SRM仓库和服务
+	srmRepos := srmrepo.NewRepositories(db)
+	srmSupplierSvc := srmsvc.NewSupplierService(srmRepos.Supplier)
+	srmProcurementSvc := srmsvc.NewProcurementService(srmRepos.PR, srmRepos.PO, db)
+	srmInspectionSvc := srmsvc.NewInspectionService(srmRepos.Inspection, srmRepos.PR)
+	srmDashboardSvc := srmsvc.NewDashboardService(db)
+	srmHandlers := srmhandler.NewHandlers(srmSupplierSvc, srmProcurementSvc, srmInspectionSvc, srmDashboardSvc, srmRepos.PO)
+
 	// 设置Gin模式
 	if cfg.Server.Mode == "release" {
 		gin.SetMode(gin.ReleaseMode)
@@ -462,7 +493,7 @@ func main() {
 	router.Use(middleware.RequestID())
 
 	// 注册路由
-	registerRoutes(router, handlers, services, cfg)
+	registerRoutes(router, handlers, services, cfg, srmHandlers)
 
 	// 创建HTTP服务器
 	srv := &http.Server{
@@ -557,7 +588,7 @@ func initRedis(cfg config.RedisConfig) *redis.Client {
 	})
 }
 
-func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, cfg *config.Config) {
+func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, cfg *config.Config, srmH *srmhandler.Handlers) {
 	// 健康检查
 	r.GET("/health/live", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -900,6 +931,57 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 
 			// 从模板创建项目
 			authorized.POST("/projects/create-from-template", h.Template.CreateProjectFromTemplate)
+
+			// === SRM模块路由 ===
+			srmGroup := authorized.Group("/srm")
+			{
+				// 供应商管理
+				suppliers := srmGroup.Group("/suppliers")
+				{
+					suppliers.GET("", srmH.Supplier.ListSuppliers)
+					suppliers.POST("", srmH.Supplier.CreateSupplier)
+					suppliers.GET("/:id", srmH.Supplier.GetSupplier)
+					suppliers.PUT("/:id", srmH.Supplier.UpdateSupplier)
+					suppliers.DELETE("/:id", srmH.Supplier.DeleteSupplier)
+					suppliers.GET("/:id/contacts", srmH.Supplier.ListContacts)
+					suppliers.POST("/:id/contacts", srmH.Supplier.CreateContact)
+					suppliers.DELETE("/:id/contacts/:contactId", srmH.Supplier.DeleteContact)
+				}
+
+				// 采购需求
+				prs := srmGroup.Group("/purchase-requests")
+				{
+					prs.GET("", srmH.PR.ListPRs)
+					prs.POST("", srmH.PR.CreatePR)
+					prs.POST("/from-bom", srmH.PR.CreatePRFromBOM)
+					prs.GET("/:id", srmH.PR.GetPR)
+					prs.PUT("/:id", srmH.PR.UpdatePR)
+					prs.POST("/:id/approve", srmH.PR.ApprovePR)
+				}
+
+				// 采购订单
+				pos := srmGroup.Group("/purchase-orders")
+				{
+					pos.GET("", srmH.PO.ListPOs)
+					pos.POST("", srmH.PO.CreatePO)
+					pos.GET("/:id", srmH.PO.GetPO)
+					pos.PUT("/:id", srmH.PO.UpdatePO)
+					pos.POST("/:id/approve", srmH.PO.ApprovePO)
+					pos.POST("/:id/items/:itemId/receive", srmH.PO.ReceiveItem)
+				}
+
+				// 来料检验
+				inspections := srmGroup.Group("/inspections")
+				{
+					inspections.GET("", srmH.Inspection.ListInspections)
+					inspections.GET("/:id", srmH.Inspection.GetInspection)
+					inspections.PUT("/:id", srmH.Inspection.UpdateInspection)
+					inspections.POST("/:id/complete", srmH.Inspection.CompleteInspection)
+				}
+
+				// 看板
+				srmGroup.GET("/dashboard/sampling-progress", srmH.Dashboard.GetSamplingProgress)
+			}
 		}
 	}
 }
