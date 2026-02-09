@@ -1,9 +1,11 @@
 package handler
 
 import (
-	"github.com/bitfantasy/nimo/internal/plm/service"
+	"net/http"
 
+	"github.com/bitfantasy/nimo/internal/plm/service"
 	"github.com/gin-gonic/gin"
+	"github.com/xuri/excelize/v2"
 )
 
 type BOMHandler struct {
@@ -233,4 +235,136 @@ func (h *BOMHandler) DeleteItem(c *gin.Context) {
 	}
 
 	Success(c, gin.H{"deleted": true})
+}
+
+// ==================== Phase 2: Excel 导入/导出 ====================
+
+// ExportBOM GET /projects/:id/boms/:bomId/export
+func (h *BOMHandler) ExportBOM(c *gin.Context) {
+	bomID := c.Param("bomId")
+
+	f, filename, err := h.svc.ExportBOM(c.Request.Context(), bomID)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	defer f.Close()
+
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	c.Header("Content-Transfer-Encoding", "binary")
+
+	if err := f.Write(c.Writer); err != nil {
+		InternalError(c, "write excel: "+err.Error())
+	}
+}
+
+// ImportBOM POST /projects/:id/boms/:bomId/import
+func (h *BOMHandler) ImportBOM(c *gin.Context) {
+	bomID := c.Param("bomId")
+
+	file, _, err := c.Request.FormFile("file")
+	if err != nil {
+		BadRequest(c, "请上传Excel文件")
+		return
+	}
+	defer file.Close()
+
+	f, err := excelize.OpenReader(file)
+	if err != nil {
+		BadRequest(c, "无法解析Excel文件: "+err.Error())
+		return
+	}
+	defer f.Close()
+
+	result, err := h.svc.ImportBOM(c.Request.Context(), bomID, f)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	Success(c, result)
+}
+
+// DownloadTemplate GET /api/v1/bom-template
+func (h *BOMHandler) DownloadTemplate(c *gin.Context) {
+	f, err := h.svc.GenerateTemplate()
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+	defer f.Close()
+
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=\"BOM_Import_Template.xlsx\"")
+	c.Header("Content-Transfer-Encoding", "binary")
+
+	if err := f.Write(c.Writer); err != nil {
+		InternalError(c, "write template: "+err.Error())
+	}
+}
+
+// ==================== Phase 3: EBOM→MBOM转换 + 版本对比 ====================
+
+// ConvertToMBOM POST /projects/:id/boms/:bomId/convert-to-mbom
+func (h *BOMHandler) ConvertToMBOM(c *gin.Context) {
+	bomID := c.Param("bomId")
+	userID := c.GetString("user_id")
+
+	mbom, err := h.svc.ConvertToMBOM(c.Request.Context(), bomID, userID)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	Created(c, mbom)
+}
+
+// CompareBOMs GET /api/v1/bom-compare?bom1=ID1&bom2=ID2
+func (h *BOMHandler) CompareBOMs(c *gin.Context) {
+	bom1 := c.Query("bom1")
+	bom2 := c.Query("bom2")
+
+	if bom1 == "" || bom2 == "" {
+		BadRequest(c, "请提供bom1和bom2参数")
+		return
+	}
+
+	result, err := h.svc.CompareBOMs(c.Request.Context(), bom1, bom2)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	Success(c, result)
+}
+
+// ==================== Phase 4: ERP对接桥梁 ====================
+
+// ListBOMReleases GET /api/v1/erp/bom-releases
+func (h *BOMHandler) ListBOMReleases(c *gin.Context) {
+	releases, err := h.svc.ListPendingReleases(c.Request.Context())
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "success",
+		"data":    gin.H{"items": releases, "total": len(releases)},
+	})
+}
+
+// AckBOMRelease POST /api/v1/erp/bom-releases/:id/ack
+func (h *BOMHandler) AckBOMRelease(c *gin.Context) {
+	releaseID := c.Param("id")
+
+	release, err := h.svc.AckRelease(c.Request.Context(), releaseID)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	Success(c, release)
 }

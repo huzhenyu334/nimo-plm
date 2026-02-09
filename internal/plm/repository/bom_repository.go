@@ -116,3 +116,59 @@ func (r *ProjectBOMRepository) BatchCreateItems(ctx context.Context, items []ent
 	}
 	return r.db.WithContext(ctx).Create(&items).Error
 }
+
+// ListItemsByBOM 获取BOM的所有行项（按item_number排序）
+func (r *ProjectBOMRepository) ListItemsByBOM(ctx context.Context, bomID string) ([]entity.ProjectBOMItem, error) {
+	var items []entity.ProjectBOMItem
+	err := r.db.WithContext(ctx).
+		Where("bom_id = ?", bomID).
+		Order("item_number ASC").
+		Find(&items).Error
+	return items, err
+}
+
+// MatchMaterialByNameAndPN 通过名称+制造商料号匹配物料库
+func (r *ProjectBOMRepository) MatchMaterialByNameAndPN(ctx context.Context, name, manufacturerPN string) (*entity.Material, error) {
+	var material entity.Material
+	query := r.db.WithContext(ctx).Where("deleted_at IS NULL")
+	if manufacturerPN != "" {
+		query = query.Where("name ILIKE ? OR code ILIKE ?", "%"+name+"%", "%"+manufacturerPN+"%")
+	} else {
+		query = query.Where("name ILIKE ?", "%"+name+"%")
+	}
+	err := query.First(&material).Error
+	if err != nil {
+		return nil, err
+	}
+	return &material, nil
+}
+
+// CreateRelease 创建BOM发布快照
+func (r *ProjectBOMRepository) CreateRelease(ctx context.Context, release *entity.BOMRelease) error {
+	return r.db.WithContext(ctx).Create(release).Error
+}
+
+// ListPendingReleases 获取待同步的发布快照
+func (r *ProjectBOMRepository) ListPendingReleases(ctx context.Context) ([]entity.BOMRelease, error) {
+	var releases []entity.BOMRelease
+	err := r.db.WithContext(ctx).
+		Where("status = ?", "pending").
+		Order("created_at ASC").
+		Find(&releases).Error
+	return releases, err
+}
+
+// FindReleaseByID 根据ID查找发布快照
+func (r *ProjectBOMRepository) FindReleaseByID(ctx context.Context, id string) (*entity.BOMRelease, error) {
+	var release entity.BOMRelease
+	err := r.db.WithContext(ctx).First(&release, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &release, nil
+}
+
+// UpdateRelease 更新发布快照
+func (r *ProjectBOMRepository) UpdateRelease(ctx context.Context, release *entity.BOMRelease) error {
+	return r.db.WithContext(ctx).Save(release).Error
+}

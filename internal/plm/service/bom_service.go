@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/bitfantasy/nimo/internal/plm/entity"
-	"github.com/bitfantasy/nimo/internal/plm/repository"
+	"math"
+	"strconv"
 	"time"
 
+	"github.com/bitfantasy/nimo/internal/plm/entity"
+	"github.com/bitfantasy/nimo/internal/plm/repository"
 	"github.com/google/uuid"
+	"github.com/xuri/excelize/v2"
 )
 
 type ProjectBOMService struct {
@@ -183,6 +187,10 @@ func (s *ProjectBOMService) FreezeBOM(ctx context.Context, id, frozenByID string
 	if err := s.bomRepo.Update(ctx, bom); err != nil {
 		return nil, fmt.Errorf("freeze bom: %w", err)
 	}
+
+	// Phase 4: 冻结时自动生成ERP发布快照
+	s.CreateBOMRelease(ctx, bom)
+
 	return bom, nil
 }
 
@@ -416,6 +424,557 @@ func (s *ProjectBOMService) updateBOMCost(ctx context.Context, bomID string) {
 	count, _ := s.bomRepo.CountItems(ctx, bomID)
 	s.bomRepo.DB().Model(&entity.ProjectBOM{}).Where("id = ?", bomID).
 		Updates(map[string]interface{}{"estimated_cost": totalCost, "total_items": count})
+}
+
+// ==================== Phase 2: Excel 导入/导出 ====================
+
+var bomExportHeaders = []string{
+	"序号", "分类", "名称", "规格", "数量", "单位", "位号",
+	"制造商", "制造商料号", "供应商", "供应商料号", "单价", "小计",
+	"是否关键", "备注",
+}
+
+// ExportBOM 导出BOM为xlsx
+func (s *ProjectBOMService) ExportBOM(ctx context.Context, bomID string) (*excelize.File, string, error) {
+	bom, err := s.bomRepo.FindByID(ctx, bomID)
+	if err != nil {
+		return nil, "", fmt.Errorf("bom not found: %w", err)
+	}
+
+	items, err := s.bomRepo.ListItemsByBOM(ctx, bomID)
+	if err != nil {
+		return nil, "", fmt.Errorf("list items: %w", err)
+	}
+
+	f := excelize.NewFile()
+	sheet := "BOM"
+	f.SetSheetName("Sheet1", sheet)
+
+	// 表头样式: 加粗
+	boldStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true, Size: 11},
+		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"#D9E1F2"}},
+		Border: []excelize.Border{
+			{Type: "bottom", Color: "000000", Style: 1},
+		},
+	})
+
+	// 写入表头
+	for i, h := range bomExportHeaders {
+		col, _ := excelize.ColumnNumberToName(i + 1)
+		cell := col + "1"
+		f.SetCellValue(sheet, cell, h)
+		f.SetCellStyle(sheet, cell, cell, boldStyle)
+	}
+
+	// 写入数据行
+	var totalCost float64
+	for rowIdx, item := range items {
+		row := rowIdx + 2
+		f.SetCellValue(sheet, fmt.Sprintf("A%d", row), item.ItemNumber)
+		f.SetCellValue(sheet, fmt.Sprintf("B%d", row), item.Category)
+		f.SetCellValue(sheet, fmt.Sprintf("C%d", row), item.Name)
+		f.SetCellValue(sheet, fmt.Sprintf("D%d", row), item.Specification)
+		f.SetCellValue(sheet, fmt.Sprintf("E%d", row), item.Quantity)
+		f.SetCellValue(sheet, fmt.Sprintf("F%d", row), item.Unit)
+		f.SetCellValue(sheet, fmt.Sprintf("G%d", row), item.Reference)
+		f.SetCellValue(sheet, fmt.Sprintf("H%d", row), item.Manufacturer)
+		f.SetCellValue(sheet, fmt.Sprintf("I%d", row), item.ManufacturerPN)
+		f.SetCellValue(sheet, fmt.Sprintf("J%d", row), item.Supplier)
+		f.SetCellValue(sheet, fmt.Sprintf("K%d", row), item.SupplierPN)
+		if item.UnitPrice != nil {
+			f.SetCellValue(sheet, fmt.Sprintf("L%d", row), *item.UnitPrice)
+		}
+		if item.ExtendedCost != nil {
+			f.SetCellValue(sheet, fmt.Sprintf("M%d", row), *item.ExtendedCost)
+			totalCost += *item.ExtendedCost
+		}
+		critical := "否"
+		if item.IsCritical {
+			critical = "是"
+		}
+		f.SetCellValue(sheet, fmt.Sprintf("N%d", row), critical)
+		f.SetCellValue(sheet, fmt.Sprintf("O%d", row), item.Notes)
+	}
+
+	// 底部汇总行
+	summaryRow := len(items) + 2
+	summaryStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+	})
+	f.SetCellValue(sheet, fmt.Sprintf("A%d", summaryRow), "汇总")
+	f.SetCellValue(sheet, fmt.Sprintf("C%d", summaryRow), fmt.Sprintf("总物料数: %d", len(items)))
+	f.SetCellValue(sheet, fmt.Sprintf("M%d", summaryRow), totalCost)
+	f.SetCellStyle(sheet, fmt.Sprintf("A%d", summaryRow), fmt.Sprintf("O%d", summaryRow), summaryStyle)
+
+	// 列宽自适应
+	colWidths := []float64{6, 10, 20, 20, 8, 6, 14, 16, 16, 16, 16, 10, 10, 8, 20}
+	for i, w := range colWidths {
+		col, _ := excelize.ColumnNumberToName(i + 1)
+		f.SetColWidth(sheet, col, col, w)
+	}
+
+	filename := fmt.Sprintf("BOM_%s_%s.xlsx", bom.Name, bom.Version)
+	return f, filename, nil
+}
+
+// ImportBOM 从Excel导入BOM行项
+func (s *ProjectBOMService) ImportBOM(ctx context.Context, bomID string, f *excelize.File) (*ImportResult, error) {
+	bom, err := s.bomRepo.FindByID(ctx, bomID)
+	if err != nil {
+		return nil, fmt.Errorf("bom not found: %w", err)
+	}
+	if bom.Status != "draft" && bom.Status != "rejected" {
+		return nil, fmt.Errorf("只有草稿或被驳回的BOM才能导入")
+	}
+
+	sheet := f.GetSheetName(0)
+	rows, err := f.GetRows(sheet)
+	if err != nil {
+		return nil, fmt.Errorf("read excel: %w", err)
+	}
+
+	result := &ImportResult{}
+	if len(rows) < 2 {
+		return result, nil
+	}
+
+	// 获取当前最大item_number
+	existingCount, _ := s.bomRepo.CountItems(ctx, bomID)
+	itemNum := int(existingCount)
+
+	var entities []entity.ProjectBOMItem
+	for i, row := range rows[1:] { // 跳过表头
+		if len(row) < 3 || row[2] == "" { // 至少需要名称
+			result.Failed++
+			continue
+		}
+
+		itemNum++
+		item := entity.ProjectBOMItem{
+			ID:         uuid.New().String()[:32],
+			BOMID:      bomID,
+			ItemNumber: itemNum,
+			Unit:       "pcs",
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		}
+
+		// 解析各列 (按模板顺序)
+		if len(row) > 1 {
+			item.Category = row[1]
+		}
+		if len(row) > 2 {
+			item.Name = row[2]
+		}
+		if len(row) > 3 {
+			item.Specification = row[3]
+		}
+		if len(row) > 4 {
+			if q, err := strconv.ParseFloat(row[4], 64); err == nil {
+				item.Quantity = q
+			} else {
+				item.Quantity = 1
+			}
+		}
+		if len(row) > 5 && row[5] != "" {
+			item.Unit = row[5]
+		}
+		if len(row) > 6 {
+			item.Reference = row[6]
+		}
+		if len(row) > 7 {
+			item.Manufacturer = row[7]
+		}
+		if len(row) > 8 {
+			item.ManufacturerPN = row[8]
+		}
+		if len(row) > 9 {
+			item.Supplier = row[9]
+		}
+		if len(row) > 10 {
+			item.SupplierPN = row[10]
+		}
+		if len(row) > 11 {
+			if p, err := strconv.ParseFloat(row[11], 64); err == nil {
+				item.UnitPrice = &p
+				extCost := item.Quantity * p
+				item.ExtendedCost = &extCost
+			}
+		}
+		// 列12(小计)跳过，自动计算
+		if len(row) > 13 && (row[13] == "是" || row[13] == "Y" || row[13] == "1") {
+			item.IsCritical = true
+		}
+		if len(row) > 14 {
+			item.Notes = row[14]
+		}
+
+		// 尝试匹配物料库
+		mat, matchErr := s.bomRepo.MatchMaterialByNameAndPN(ctx, item.Name, item.ManufacturerPN)
+		if matchErr == nil && mat != nil {
+			item.MaterialID = &mat.ID
+			result.Matched++
+		}
+
+		entities = append(entities, item)
+		result.Success++
+
+		_ = i // suppress unused
+	}
+
+	if len(entities) > 0 {
+		if err := s.bomRepo.BatchCreateItems(ctx, entities); err != nil {
+			return nil, fmt.Errorf("batch create: %w", err)
+		}
+		s.updateBOMCost(ctx, bomID)
+	}
+
+	return result, nil
+}
+
+// GenerateTemplate 生成BOM导入模板xlsx
+func (s *ProjectBOMService) GenerateTemplate() (*excelize.File, error) {
+	f := excelize.NewFile()
+	sheet := "BOM模板"
+	f.SetSheetName("Sheet1", sheet)
+
+	boldStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true, Size: 11},
+		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"#D9E1F2"}},
+	})
+
+	for i, h := range bomExportHeaders {
+		col, _ := excelize.ColumnNumberToName(i + 1)
+		cell := col + "1"
+		f.SetCellValue(sheet, cell, h)
+		f.SetCellStyle(sheet, cell, cell, boldStyle)
+	}
+
+	// 列宽
+	colWidths := []float64{6, 10, 20, 20, 8, 6, 14, 16, 16, 16, 16, 10, 10, 8, 20}
+	for i, w := range colWidths {
+		col, _ := excelize.ColumnNumberToName(i + 1)
+		f.SetColWidth(sheet, col, col, w)
+	}
+
+	// 数据验证说明sheet
+	helpSheet := "填写说明"
+	f.NewSheet(helpSheet)
+	helpData := [][]string{
+		{"列名", "说明", "是否必填"},
+		{"序号", "自动编号，可留空", "否"},
+		{"分类", "物料分类，如: 电阻/电容/IC/结构件", "否"},
+		{"名称", "物料名称", "是"},
+		{"规格", "规格型号描述", "否"},
+		{"数量", "用量数字，默认1", "是"},
+		{"单位", "pcs/kg/m/set，默认pcs", "否"},
+		{"位号", "PCB位号，如R1,R2,R3", "否"},
+		{"制造商", "制造商名称", "否"},
+		{"制造商料号", "制造商Part Number，用于自动匹配物料库", "否"},
+		{"供应商", "供应商名称", "否"},
+		{"供应商料号", "供应商Part Number", "否"},
+		{"单价", "物料单价(元)", "否"},
+		{"小计", "自动计算=数量×单价，无需填写", "否"},
+		{"是否关键", "填写 是/否", "否"},
+		{"备注", "备注信息", "否"},
+	}
+	for i, row := range helpData {
+		for j, val := range row {
+			col, _ := excelize.ColumnNumberToName(j + 1)
+			f.SetCellValue(helpSheet, fmt.Sprintf("%s%d", col, i+1), val)
+		}
+	}
+	f.SetColWidth(helpSheet, "A", "A", 14)
+	f.SetColWidth(helpSheet, "B", "B", 40)
+	f.SetColWidth(helpSheet, "C", "C", 10)
+
+	// 示例数据行
+	sampleData := []string{"1", "电阻", "100K电阻 0402", "100KΩ ±1% 0402", "10", "pcs", "R1-R10", "Yageo", "RC0402FR-07100KL", "DigiKey", "311-100KLRCT-ND", "0.05", "", "否", ""}
+	for j, val := range sampleData {
+		col, _ := excelize.ColumnNumberToName(j + 1)
+		f.SetCellValue(sheet, fmt.Sprintf("%s2", col), val)
+	}
+
+	return f, nil
+}
+
+// ==================== Phase 3: EBOM→MBOM转换 + 版本对比 ====================
+
+// ConvertToMBOM 将EBOM一键转换为MBOM
+func (s *ProjectBOMService) ConvertToMBOM(ctx context.Context, bomID, createdBy string) (*entity.ProjectBOM, error) {
+	srcBOM, err := s.bomRepo.FindByID(ctx, bomID)
+	if err != nil {
+		return nil, fmt.Errorf("source bom not found: %w", err)
+	}
+
+	// 创建新MBOM
+	newBOM := &entity.ProjectBOM{
+		ID:          uuid.New().String()[:32],
+		ProjectID:   srcBOM.ProjectID,
+		PhaseID:     srcBOM.PhaseID,
+		BOMType:     "MBOM",
+		Version:     "v1.0",
+		Name:        srcBOM.Name + " (MBOM)",
+		Status:      "draft",
+		Description: fmt.Sprintf("从 %s %s 转换而来", srcBOM.Name, srcBOM.Version),
+		ParentBOMID: &srcBOM.ID,
+		CreatedBy:   createdBy,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	if err := s.bomRepo.Create(ctx, newBOM); err != nil {
+		return nil, fmt.Errorf("create mbom: %w", err)
+	}
+
+	// 深拷贝所有行项
+	items, err := s.bomRepo.ListItemsByBOM(ctx, bomID)
+	if err != nil {
+		return nil, fmt.Errorf("list items: %w", err)
+	}
+
+	if len(items) > 0 {
+		var newItems []entity.ProjectBOMItem
+		for _, item := range items {
+			newItem := item
+			newItem.ID = uuid.New().String()[:32]
+			newItem.BOMID = newBOM.ID
+			newItem.ParentItemID = nil // 清除父项引用，需要用户重新组织
+			newItem.CreatedAt = time.Now()
+			newItem.UpdatedAt = time.Now()
+			newItems = append(newItems, newItem)
+		}
+
+		if err := s.bomRepo.BatchCreateItems(ctx, newItems); err != nil {
+			return nil, fmt.Errorf("copy items: %w", err)
+		}
+
+		newBOM.TotalItems = len(newItems)
+		newBOM.EstimatedCost = srcBOM.EstimatedCost
+		s.bomRepo.Update(ctx, newBOM)
+	}
+
+	// 重新加载完整数据返回
+	return s.bomRepo.FindByID(ctx, newBOM.ID)
+}
+
+// CompareBOMs 对比两个BOM的行项差异
+func (s *ProjectBOMService) CompareBOMs(ctx context.Context, bom1ID, bom2ID string) (*BOMCompareResult, error) {
+	bom1, err := s.bomRepo.FindByID(ctx, bom1ID)
+	if err != nil {
+		return nil, fmt.Errorf("bom1 not found: %w", err)
+	}
+	bom2, err := s.bomRepo.FindByID(ctx, bom2ID)
+	if err != nil {
+		return nil, fmt.Errorf("bom2 not found: %w", err)
+	}
+
+	items1, err := s.bomRepo.ListItemsByBOM(ctx, bom1ID)
+	if err != nil {
+		return nil, fmt.Errorf("list bom1 items: %w", err)
+	}
+	items2, err := s.bomRepo.ListItemsByBOM(ctx, bom2ID)
+	if err != nil {
+		return nil, fmt.Errorf("list bom2 items: %w", err)
+	}
+
+	// 用 名称+制造商料号 作为匹配key
+	makeKey := func(item entity.ProjectBOMItem) string {
+		return item.Name + "|" + item.ManufacturerPN
+	}
+
+	map1 := make(map[string]entity.ProjectBOMItem)
+	for _, item := range items1 {
+		map1[makeKey(item)] = item
+	}
+	map2 := make(map[string]entity.ProjectBOMItem)
+	for _, item := range items2 {
+		map2[makeKey(item)] = item
+	}
+
+	result := &BOMCompareResult{
+		BOM1: BOMSummary{ID: bom1.ID, Name: bom1.Name, Version: bom1.Version, BOMType: bom1.BOMType},
+		BOM2: BOMSummary{ID: bom2.ID, Name: bom2.Name, Version: bom2.Version, BOMType: bom2.BOMType},
+	}
+
+	// 遍历bom1的项
+	for key, item1 := range map1 {
+		if item2, exists := map2[key]; exists {
+			// 两边都有，检查变更
+			changes := compareItemFields(item1, item2)
+			if len(changes) > 0 {
+				result.Changed = append(result.Changed, BOMItemDiff{
+					Key:     key,
+					Item1:   item1,
+					Item2:   item2,
+					Changes: changes,
+				})
+			} else {
+				result.Unchanged = append(result.Unchanged, item1)
+			}
+		} else {
+			// bom1有bom2没有 → removed
+			result.Removed = append(result.Removed, item1)
+		}
+	}
+
+	// 遍历bom2，找出bom1没有的 → added
+	for key, item2 := range map2 {
+		if _, exists := map1[key]; !exists {
+			result.Added = append(result.Added, item2)
+		}
+	}
+
+	return result, nil
+}
+
+func compareItemFields(a, b entity.ProjectBOMItem) []FieldChange {
+	var changes []FieldChange
+
+	if a.Quantity != b.Quantity {
+		changes = append(changes, FieldChange{Field: "quantity", Old: fmt.Sprintf("%.4f", a.Quantity), New: fmt.Sprintf("%.4f", b.Quantity)})
+	}
+	if !floatPtrEqual(a.UnitPrice, b.UnitPrice) {
+		changes = append(changes, FieldChange{Field: "unit_price", Old: floatPtrStr(a.UnitPrice), New: floatPtrStr(b.UnitPrice)})
+	}
+	if a.Supplier != b.Supplier {
+		changes = append(changes, FieldChange{Field: "supplier", Old: a.Supplier, New: b.Supplier})
+	}
+	if a.SupplierPN != b.SupplierPN {
+		changes = append(changes, FieldChange{Field: "supplier_pn", Old: a.SupplierPN, New: b.SupplierPN})
+	}
+	if a.Specification != b.Specification {
+		changes = append(changes, FieldChange{Field: "specification", Old: a.Specification, New: b.Specification})
+	}
+	if a.Unit != b.Unit {
+		changes = append(changes, FieldChange{Field: "unit", Old: a.Unit, New: b.Unit})
+	}
+	if a.Reference != b.Reference {
+		changes = append(changes, FieldChange{Field: "reference", Old: a.Reference, New: b.Reference})
+	}
+	if a.IsCritical != b.IsCritical {
+		changes = append(changes, FieldChange{Field: "is_critical", Old: fmt.Sprintf("%v", a.IsCritical), New: fmt.Sprintf("%v", b.IsCritical)})
+	}
+
+	return changes
+}
+
+func floatPtrEqual(a, b *float64) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return math.Abs(*a-*b) < 0.0001
+}
+
+func floatPtrStr(p *float64) string {
+	if p == nil {
+		return ""
+	}
+	return fmt.Sprintf("%.4f", *p)
+}
+
+// ==================== Phase 4: ERP对接桥梁 ====================
+
+// CreateBOMRelease 创建BOM发布快照（冻结时自动调用）
+func (s *ProjectBOMService) CreateBOMRelease(ctx context.Context, bom *entity.ProjectBOM) (*entity.BOMRelease, error) {
+	items, err := s.bomRepo.ListItemsByBOM(ctx, bom.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list items for snapshot: %w", err)
+	}
+
+	snapshot := map[string]interface{}{
+		"bom":   bom,
+		"items": items,
+	}
+	snapshotBytes, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("marshal snapshot: %w", err)
+	}
+
+	release := &entity.BOMRelease{
+		ID:           uuid.New().String(),
+		BOMID:        bom.ID,
+		ProjectID:    bom.ProjectID,
+		BOMType:      bom.BOMType,
+		Version:      bom.Version,
+		SnapshotJSON: string(snapshotBytes),
+		Status:       "pending",
+		CreatedAt:    time.Now(),
+	}
+
+	if err := s.bomRepo.CreateRelease(ctx, release); err != nil {
+		return nil, fmt.Errorf("create release: %w", err)
+	}
+
+	return release, nil
+}
+
+// ListPendingReleases 获取待同步的BOM发布快照
+func (s *ProjectBOMService) ListPendingReleases(ctx context.Context) ([]entity.BOMRelease, error) {
+	return s.bomRepo.ListPendingReleases(ctx)
+}
+
+// AckRelease ERP确认接收
+func (s *ProjectBOMService) AckRelease(ctx context.Context, releaseID string) (*entity.BOMRelease, error) {
+	release, err := s.bomRepo.FindReleaseByID(ctx, releaseID)
+	if err != nil {
+		return nil, fmt.Errorf("release not found: %w", err)
+	}
+
+	if release.Status != "pending" {
+		return nil, fmt.Errorf("只有pending状态的发布可以确认")
+	}
+
+	now := time.Now()
+	release.Status = "synced"
+	release.SyncedAt = &now
+
+	if err := s.bomRepo.UpdateRelease(ctx, release); err != nil {
+		return nil, fmt.Errorf("update release: %w", err)
+	}
+
+	return release, nil
+}
+
+// ---- Phase 2/3/4 DTOs ----
+
+type ImportResult struct {
+	Success int `json:"success"`
+	Failed  int `json:"failed"`
+	Matched int `json:"matched"`
+}
+
+type BOMCompareResult struct {
+	BOM1      BOMSummary             `json:"bom1"`
+	BOM2      BOMSummary             `json:"bom2"`
+	Added     []entity.ProjectBOMItem `json:"added"`
+	Removed   []entity.ProjectBOMItem `json:"removed"`
+	Changed   []BOMItemDiff          `json:"changed"`
+	Unchanged []entity.ProjectBOMItem `json:"unchanged"`
+}
+
+type BOMSummary struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	BOMType string `json:"bom_type"`
+}
+
+type BOMItemDiff struct {
+	Key     string                 `json:"key"`
+	Item1   entity.ProjectBOMItem  `json:"item1"`
+	Item2   entity.ProjectBOMItem  `json:"item2"`
+	Changes []FieldChange          `json:"changes"`
+}
+
+type FieldChange struct {
+	Field string `json:"field"`
+	Old   string `json:"old"`
+	New   string `json:"new"`
 }
 
 // ---- Input DTOs ----

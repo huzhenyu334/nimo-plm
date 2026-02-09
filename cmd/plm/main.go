@@ -331,6 +331,21 @@ func main() {
 			created_at TIMESTAMP DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_routing_logs_entity ON routing_logs(entity_type, event)`,
+
+		// V11: BOM发布快照表（ERP对接）
+		`CREATE TABLE IF NOT EXISTS bom_releases (
+			id VARCHAR(36) PRIMARY KEY,
+			bom_id VARCHAR(32) NOT NULL,
+			project_id VARCHAR(32) NOT NULL,
+			bom_type VARCHAR(16) NOT NULL,
+			version VARCHAR(16) NOT NULL,
+			snapshot_json JSONB NOT NULL,
+			status VARCHAR(16) NOT NULL DEFAULT 'pending',
+			synced_at TIMESTAMP,
+			created_at TIMESTAMP DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bom_releases_status ON bom_releases(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_bom_releases_bom ON bom_releases(bom_id)`,
 	}
 	for _, sql := range migrationSQL {
 		if err := db.Exec(sql).Error; err != nil {
@@ -678,6 +693,19 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				authorized.GET("/routing-logs", h.Routing.ListLogs)
 			}
 
+			// Phase 2: BOM导入模板下载
+			authorized.GET("/bom-template", h.ProjectBOM.DownloadTemplate)
+
+			// Phase 3: BOM版本对比
+			authorized.GET("/bom-compare", h.ProjectBOM.CompareBOMs)
+
+			// Phase 4: ERP对接
+			erp := authorized.Group("/erp")
+			{
+				erp.GET("/bom-releases", h.ProjectBOM.ListBOMReleases)
+				erp.POST("/bom-releases/:id/ack", h.ProjectBOM.AckBOMRelease)
+			}
+
 			// 任务角色（用于模板任务分配）
 			authorized.GET("/task-roles", h.Role.ListTaskRoles)
 
@@ -774,6 +802,11 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				projects.PUT("/:id/boms/:bomId/items/:itemId", h.ProjectBOM.UpdateItem)
 				projects.DELETE("/:id/boms/:bomId/items/:itemId", h.ProjectBOM.DeleteItem)
 				projects.POST("/:id/boms/:bomId/reorder", h.ProjectBOM.ReorderItems)
+				// Phase 2: Excel导入导出
+				projects.GET("/:id/boms/:bomId/export", h.ProjectBOM.ExportBOM)
+				projects.POST("/:id/boms/:bomId/import", h.ProjectBOM.ImportBOM)
+				// Phase 3: EBOM→MBOM转换
+				projects.POST("/:id/boms/:bomId/convert-to-mbom", h.ProjectBOM.ConvertToMBOM)
 
 				// V2: 交付物管理
 				projects.GET("/:id/deliverables", h.Deliverable.ListByProject)

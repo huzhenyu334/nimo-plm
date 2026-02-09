@@ -82,3 +82,20 @@ type ProjectBOMItem struct {
 func (ProjectBOMItem) TableName() string {
 	return "project_bom_items"
 }
+
+// BOMRelease BOM发布快照（ERP对接用）
+type BOMRelease struct {
+	ID           string     `json:"id" gorm:"primaryKey;size:36"`
+	BOMID        string     `json:"bom_id" gorm:"size:32;not null"`
+	ProjectID    string     `json:"project_id" gorm:"size:32;not null"`
+	BOMType      string     `json:"bom_type" gorm:"size:16;not null"`
+	Version      string     `json:"version" gorm:"size:16;not null"`
+	SnapshotJSON string     `json:"snapshot_json" gorm:"type:jsonb;not null"`
+	Status       string     `json:"status" gorm:"size:16;not null;default:pending"` // pending/synced/failed
+	SyncedAt     *time.Time `json:"synced_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+func (BOMRelease) TableName() string {
+	return "bom_releases"
+}
