@@ -274,6 +274,16 @@ export const srmApi = {
     return response.data.data;
   },
 
+  assignSupplier: async (prId: string, itemId: string, data: { supplier_id: string; unit_price?: number; expected_date?: string }): Promise<PRItem> => {
+    const response = await apiClient.put<ApiResponse<PRItem>>(`/srm/purchase-requests/${prId}/items/${itemId}/assign-supplier`, data);
+    return response.data.data;
+  },
+
+  generatePOs: async (prId: string): Promise<PurchaseOrder[]> => {
+    const response = await apiClient.post<ApiResponse<PurchaseOrder[]>>(`/srm/purchase-requests/${prId}/generate-pos`);
+    return response.data.data;
+  },
+
   // --- Purchase Orders ---
   listPOs: async (params?: {
     supplier_id?: string;

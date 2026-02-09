@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Table,
   Card,
@@ -10,13 +10,14 @@ import {
   Modal,
   Form,
   DatePicker,
+  InputNumber,
   message,
   Drawer,
   Descriptions,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, ImportOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, ImportOutlined, ShoppingCartOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { srmApi, PurchaseRequest } from '@/api/srm';
+import { srmApi, PurchaseRequest, PRItem } from '@/api/srm';
 import { projectApi } from '@/api/projects';
 import { projectBomApi } from '@/api/projectBom';
 import dayjs from 'dayjs';
@@ -31,19 +32,19 @@ const priorityColors: Record<string, string> = { low: 'default', medium: 'blue',
 
 const statusLabels: Record<string, string> = {
   draft: '草稿', pending: '待审批', approved: '已批准', rejected: '已拒绝',
-  in_progress: '进行中', completed: '已完成', cancelled: '已取消',
+  sourcing: '寻源中', in_progress: '进行中', completed: '已完成', cancelled: '已取消',
 };
 const statusColors: Record<string, string> = {
   draft: 'default', pending: 'processing', approved: 'success', rejected: 'error',
-  in_progress: 'processing', completed: 'success', cancelled: 'default',
+  sourcing: 'cyan', in_progress: 'processing', completed: 'success', cancelled: 'default',
 };
 
 const itemStatusLabels: Record<string, string> = {
-  pending: '待处理', ordered: '已下单', received: '已收货',
+  pending: '待处理', sourcing: '寻源中', ordered: '已下单', received: '已收货',
   inspecting: '检验中', passed: '已通过', failed: '未通过',
 };
 const itemStatusColors: Record<string, string> = {
-  pending: 'default', ordered: 'processing', received: 'blue',
+  pending: 'default', sourcing: 'cyan', ordered: 'processing', received: 'blue',
   inspecting: 'orange', passed: 'success', failed: 'error',
 };
 
@@ -59,8 +60,11 @@ const PurchaseRequests: React.FC = () => {
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [currentPR, setCurrentPR] = useState<PurchaseRequest | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
+  const [assignModalVisible, setAssignModalVisible] = useState(false);
+  const [assigningItem, setAssigningItem] = useState<PRItem | null>(null);
   const [form] = Form.useForm();
   const [bomForm] = Form.useForm();
+  const [assignForm] = Form.useForm();
 
   const { data, isLoading } = useQuery({
     queryKey: ['srm-prs', searchText, filterType, filterStatus, page, pageSize],
@@ -91,6 +95,18 @@ const PurchaseRequests: React.FC = () => {
     enabled: !!selectedProjectId,
   });
 
+  const { data: supplierData } = useQuery({
+    queryKey: ['srm-suppliers-select'],
+    queryFn: () => srmApi.listSuppliers({ page_size: 200, status: 'active' }),
+  });
+
+  // 供应商ID→名称映射
+  const supplierMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    (supplierData?.items || []).forEach((s) => { map[s.id] = s.name; });
+    return map;
+  }, [supplierData]);
+
   const createMutation = useMutation({
     mutationFn: (values: any) => {
       const payload = {
@@ -118,6 +134,51 @@ const PurchaseRequests: React.FC = () => {
     },
     onError: () => message.error('创建失败'),
   });
+
+  const assignSupplierMutation = useMutation({
+    mutationFn: (values: { supplier_id: string; unit_price?: number; expected_date?: string }) =>
+      srmApi.assignSupplier(currentPR!.id, assigningItem!.id, values),
+    onSuccess: () => {
+      message.success('供应商分配成功');
+      setAssignModalVisible(false);
+      assignForm.resetFields();
+      setAssigningItem(null);
+      queryClient.invalidateQueries({ queryKey: ['srm-pr', currentPR?.id] });
+    },
+    onError: () => message.error('分配失败'),
+  });
+
+  const generatePOsMutation = useMutation({
+    mutationFn: () => srmApi.generatePOs(currentPR!.id),
+    onSuccess: (pos) => {
+      message.success(`成功生成 ${pos.length} 张采购订单`);
+      queryClient.invalidateQueries({ queryKey: ['srm-pr', currentPR?.id] });
+      queryClient.invalidateQueries({ queryKey: ['srm-prs'] });
+      queryClient.invalidateQueries({ queryKey: ['srm-pos'] });
+    },
+    onError: () => message.error('生成采购订单失败'),
+  });
+
+  // 统计已分配供应商的行项
+  const assignedItems = useMemo(() => {
+    const items = (prDetail as PurchaseRequest)?.items || [];
+    return items.filter((item) => item.supplier_id);
+  }, [prDetail]);
+
+  const supplierCount = useMemo(() => {
+    const ids = new Set(assignedItems.map((item) => item.supplier_id));
+    return ids.size;
+  }, [assignedItems]);
+
+  const handleGeneratePOs = () => {
+    Modal.confirm({
+      title: '生成采购订单',
+      content: `将为 ${supplierCount} 个供应商生成 ${supplierCount} 张采购订单，确认？`,
+      okText: '确认生成',
+      cancelText: '取消',
+      onOk: () => generatePOsMutation.mutate(),
+    });
+  };
 
   const columns = [
     {
@@ -195,29 +256,52 @@ const PurchaseRequests: React.FC = () => {
       width: 120,
       render: (text: string) => <span style={{ fontFamily: 'monospace' }}>{text || '-'}</span>,
     },
-    { title: '名称', dataIndex: 'material_name', key: 'material_name', width: 160, ellipsis: true },
-    { title: '规格', dataIndex: 'specification', key: 'specification', width: 120, ellipsis: true },
-    { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 80 },
+    { title: '名称', dataIndex: 'material_name', key: 'material_name', width: 140, ellipsis: true },
+    { title: '规格', dataIndex: 'specification', key: 'specification', width: 100, ellipsis: true },
+    { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 60 },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 90,
+      width: 80,
       render: (s: string) => <Tag color={itemStatusColors[s]}>{itemStatusLabels[s] || s}</Tag>,
     },
     {
       title: '供应商',
       dataIndex: 'supplier_id',
       key: 'supplier_id',
-      width: 100,
-      render: (id: string) => id?.slice(0, 8) || '-',
+      width: 120,
+      render: (id: string) => (id ? (supplierMap[id] || id.slice(0, 8)) : '-'),
     },
     {
       title: '单价',
       dataIndex: 'unit_price',
       key: 'unit_price',
-      width: 90,
+      width: 80,
       render: (p?: number) => (p != null ? `¥${p.toFixed(2)}` : '-'),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 100,
+      render: (_: unknown, record: PRItem) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={(e) => {
+            e.stopPropagation();
+            setAssigningItem(record);
+            assignForm.setFieldsValue({
+              supplier_id: record.supplier_id || undefined,
+              unit_price: record.unit_price,
+              expected_date: record.expected_date ? dayjs(record.expected_date) : undefined,
+            });
+            setAssignModalVisible(true);
+          }}
+        >
+          分配供应商
+        </Button>
+      ),
     },
   ];
 
@@ -361,12 +445,62 @@ const PurchaseRequests: React.FC = () => {
         </Form>
       </Modal>
 
+      {/* 分配供应商 */}
+      <Modal
+        title={`分配供应商 - ${assigningItem?.material_name || ''}`}
+        open={assignModalVisible}
+        onOk={() =>
+          assignForm.validateFields().then((values) => {
+            const payload = {
+              ...values,
+              expected_date: values.expected_date?.toISOString(),
+            };
+            assignSupplierMutation.mutate(payload);
+          })
+        }
+        onCancel={() => { setAssignModalVisible(false); assignForm.resetFields(); setAssigningItem(null); }}
+        confirmLoading={assignSupplierMutation.isPending}
+        width={480}
+      >
+        <Form form={assignForm} layout="vertical">
+          <Form.Item name="supplier_id" label="供应商" rules={[{ required: true, message: '请选择供应商' }]}>
+            <Select
+              placeholder="选择供应商"
+              showSearch
+              optionFilterProp="label"
+              options={(supplierData?.items || []).map((s) => ({ value: s.id, label: `${s.name} (${s.code})` }))}
+            />
+          </Form.Item>
+          <Form.Item name="unit_price" label="单价">
+            <InputNumber placeholder="单价" min={0} precision={4} style={{ width: '100%' }} addonBefore="¥" />
+          </Form.Item>
+          <Form.Item name="expected_date" label="预计交期">
+            <DatePicker style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       {/* 详情抽屉 */}
       <Drawer
-        title={detail?.pr_code || '采购需求详情'}
+        title={
+          <Space>
+            <span>{detail?.pr_code || '采购需求详情'}</span>
+            {detail && assignedItems.length > 0 && (
+              <Button
+                type="primary"
+                icon={<ShoppingCartOutlined />}
+                size="small"
+                loading={generatePOsMutation.isPending}
+                onClick={handleGeneratePOs}
+              >
+                生成采购订单
+              </Button>
+            )}
+          </Space>
+        }
         open={drawerVisible}
         onClose={() => { setDrawerVisible(false); setCurrentPR(null); }}
-        width={720}
+        width={820}
       >
         {detail && (
           <>
@@ -395,7 +529,7 @@ const PurchaseRequests: React.FC = () => {
               dataSource={(prDetail as PurchaseRequest)?.items || []}
               rowKey="id"
               size="small"
-              scroll={{ x: 700 }}
+              scroll={{ x: 800 }}
               pagination={false}
             />
           </>

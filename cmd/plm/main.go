@@ -480,6 +480,11 @@ func main() {
 	srmDashboardSvc := srmsvc.NewDashboardService(db)
 	srmHandlers := srmhandler.NewHandlers(srmSupplierSvc, srmProcurementSvc, srmInspectionSvc, srmDashboardSvc, srmRepos.PO)
 
+	// SRM→飞书：注入飞书客户端到采购服务
+	if feishuWorkflowClient != nil {
+		srmProcurementSvc.SetFeishuClient(feishuWorkflowClient)
+	}
+
 	// PLM→SRM集成：BOM创建后自动生成打样采购需求
 	services.Project.SetSRMProcurementService(srmProcurementSvc)
 
@@ -960,6 +965,8 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 					prs.GET("/:id", srmH.PR.GetPR)
 					prs.PUT("/:id", srmH.PR.UpdatePR)
 					prs.POST("/:id/approve", srmH.PR.ApprovePR)
+					prs.PUT("/:id/items/:itemId/assign-supplier", srmH.PR.AssignSupplierToItem)
+					prs.POST("/:id/generate-pos", srmH.PR.GeneratePOs)
 				}
 
 				// 采购订单

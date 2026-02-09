@@ -107,6 +107,19 @@ func (r *PRRepository) FindByBOMID(ctx context.Context, bomID string) (*entity.P
 	return &pr, nil
 }
 
+// FindItemByID 根据ID查找PR行项
+func (r *PRRepository) FindItemByID(ctx context.Context, itemID string) (*entity.PRItem, error) {
+	var item entity.PRItem
+	err := r.db.WithContext(ctx).Where("id = ?", itemID).First(&item).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
 // GenerateCode 生成PR编码 PR-{year}-{4位}
 func (r *PRRepository) GenerateCode(ctx context.Context) (string, error) {
 	year := time.Now().Format("2006")

@@ -142,6 +142,42 @@ func (h *PRHandler) CreatePRFromBOM(c *gin.Context) {
 	Created(c, pr)
 }
 
+// AssignSupplierToItem 为PR行项分配供应商
+// PUT /api/v1/srm/purchase-requests/:id/items/:itemId/assign-supplier
+func (h *PRHandler) AssignSupplierToItem(c *gin.Context) {
+	prID := c.Param("id")
+	itemID := c.Param("itemId")
+
+	var req service.AssignSupplierRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	item, err := h.svc.AssignSupplierToItem(c.Request.Context(), prID, itemID, &req)
+	if err != nil {
+		InternalError(c, "分配供应商失败: "+err.Error())
+		return
+	}
+
+	Success(c, item)
+}
+
+// GeneratePOs 从PR生成采购订单
+// POST /api/v1/srm/purchase-requests/:id/generate-pos
+func (h *PRHandler) GeneratePOs(c *gin.Context) {
+	prID := c.Param("id")
+	userID := GetUserID(c)
+
+	pos, err := h.svc.GeneratePOsFromPR(c.Request.Context(), prID, userID)
+	if err != nil {
+		InternalError(c, "生成采购订单失败: "+err.Error())
+		return
+	}
+
+	Success(c, pos)
+}
+
 // ApprovePR 审批采购需求
 // POST /api/v1/srm/purchase-requests/:id/approve
 func (h *PRHandler) ApprovePR(c *gin.Context) {
