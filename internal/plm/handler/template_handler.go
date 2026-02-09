@@ -577,8 +577,23 @@ func (h *TemplateHandler) UpgradeVersion(c *gin.Context) {
 		return
 	}
 
+	// 支持前端传入版本号
+	var req struct {
+		Version string `json:"version"`
+	}
+	c.ShouldBindJSON(&req)
+
 	userID := GetUserID(c)
-	newVersion := nextVersion(template.Version)
+	newVersion := req.Version
+	if newVersion == "" {
+		newVersion = nextVersion(template.Version)
+	}
+
+	// 版本号校验
+	if !isVersionGreater(newVersion, template.Version) {
+		BadRequest(c, fmt.Sprintf("新版本号 %s 必须大于当前版本 %s", newVersion, template.Version))
+		return
+	}
 
 	// 创建新的草稿版本（复制任务）
 	newTemplate, err := h.svc.CreateNewVersion(c.Request.Context(), template, newVersion, userID)

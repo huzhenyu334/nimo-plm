@@ -131,8 +131,8 @@ export const templateApi = {
   },
 
   // 升级版本（从已发布版本创建新草稿）
-  upgrade: async (id: string): Promise<ProjectTemplate> => {
-    const response = await apiClient.post<ApiResponse<ProjectTemplate>>(`/templates/${id}/upgrade`);
+  upgrade: async (id: string, version?: string): Promise<ProjectTemplate> => {
+    const response = await apiClient.post<ApiResponse<ProjectTemplate>>(`/templates/${id}/upgrade`, version ? { version } : {});
     return response.data.data;
   },
 

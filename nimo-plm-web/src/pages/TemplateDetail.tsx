@@ -762,8 +762,8 @@ const TemplateDetail: React.FC = () => {
 
     setVersionSaving(true);
     try {
-      // 创建新草稿版本
-      const newTemplate = await templateApi.upgrade(id);
+      // 创建新草稿版本（传入用户指定的版本号）
+      const newTemplate = await templateApi.upgrade(id, newVersionInput.trim());
 
       // 保存当前编辑的任务到新草稿
       const payload = buildSavePayload();
