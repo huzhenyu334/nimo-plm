@@ -467,6 +467,9 @@ func main() {
 		&srmentity.CorrectiveAction{},
 		&srmentity.Settlement{},
 		&srmentity.SettlementDispute{},
+		&srmentity.SRMProject{},
+		&srmentity.ActivityLog{},
+		&srmentity.DelayRequest{},
 	); err != nil {
 		zapLogger.Warn("AutoMigrate SRM tables warning", zap.Error(err))
 	}
@@ -478,7 +481,8 @@ func main() {
 	srmProcurementSvc := srmsvc.NewProcurementService(srmRepos.PR, srmRepos.PO, db)
 	srmInspectionSvc := srmsvc.NewInspectionService(srmRepos.Inspection, srmRepos.PR)
 	srmDashboardSvc := srmsvc.NewDashboardService(db)
-	srmHandlers := srmhandler.NewHandlers(srmSupplierSvc, srmProcurementSvc, srmInspectionSvc, srmDashboardSvc, srmRepos.PO)
+	srmProjectSvc := srmsvc.NewSRMProjectService(srmRepos.Project, srmRepos.PR, srmRepos.ActivityLog, srmRepos.DelayRequest, db)
+	srmHandlers := srmhandler.NewHandlers(srmSupplierSvc, srmProcurementSvc, srmInspectionSvc, srmDashboardSvc, srmRepos.PO, srmProjectSvc)
 
 	// SRM→飞书：注入飞书客户端到采购服务
 	if feishuWorkflowClient != nil {
@@ -991,6 +995,30 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 
 				// 看板
 				srmGroup.GET("/dashboard/sampling-progress", srmH.Dashboard.GetSamplingProgress)
+
+				// 采购项目
+				projects := srmGroup.Group("/projects")
+				{
+					projects.GET("", srmH.Project.ListProjects)
+					projects.POST("", srmH.Project.CreateProject)
+					projects.GET("/:id", srmH.Project.GetProject)
+					projects.PUT("/:id", srmH.Project.UpdateProject)
+					projects.GET("/:id/progress", srmH.Project.GetProjectProgress)
+					projects.GET("/:id/activities", srmH.Project.ListActivityLogs)
+				}
+
+				// 延期审批
+				delays := srmGroup.Group("/delay-requests")
+				{
+					delays.GET("", srmH.Project.ListDelayRequests)
+					delays.POST("", srmH.Project.CreateDelayRequest)
+					delays.GET("/:id", srmH.Project.GetDelayRequest)
+					delays.POST("/:id/approve", srmH.Project.ApproveDelayRequest)
+					delays.POST("/:id/reject", srmH.Project.RejectDelayRequest)
+				}
+
+				// 操作日志
+				srmGroup.GET("/activities/:entityType/:entityId", srmH.Project.ListEntityActivityLogs)
 			}
 		}
 	}

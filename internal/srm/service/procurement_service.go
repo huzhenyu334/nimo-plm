@@ -33,10 +33,11 @@ type BOMItemInfo struct {
 
 // ProcurementService 采购服务
 type ProcurementService struct {
-	prRepo       *repository.PRRepository
-	poRepo       *repository.PORepository
-	db           *gorm.DB
-	feishuClient *feishu.FeishuClient
+	prRepo          *repository.PRRepository
+	poRepo          *repository.PORepository
+	db              *gorm.DB
+	feishuClient    *feishu.FeishuClient
+	activityLogRepo *repository.ActivityLogRepository
 }
 
 func NewProcurementService(prRepo *repository.PRRepository, poRepo *repository.PORepository, db *gorm.DB) *ProcurementService {
@@ -44,6 +45,18 @@ func NewProcurementService(prRepo *repository.PRRepository, poRepo *repository.P
 		prRepo: prRepo,
 		poRepo: poRepo,
 		db:     db,
+	}
+}
+
+// SetActivityLogRepo 注入操作日志仓库
+func (s *ProcurementService) SetActivityLogRepo(repo *repository.ActivityLogRepository) {
+	s.activityLogRepo = repo
+}
+
+// logActivity 记录操作日志（安全调用）
+func (s *ProcurementService) logActivity(ctx context.Context, entityType, entityID, entityCode, action, fromStatus, toStatus, content, operatorID string) {
+	if s.activityLogRepo != nil {
+		s.activityLogRepo.LogActivity(ctx, entityType, entityID, entityCode, action, fromStatus, toStatus, content, operatorID, "")
 	}
 }
 
@@ -139,6 +152,10 @@ func (s *ProcurementService) CreatePR(ctx context.Context, userID string, req *C
 	if err := s.prRepo.Create(ctx, pr); err != nil {
 		return nil, err
 	}
+
+	s.logActivity(ctx, "pr", pr.ID, pr.PRCode, "create", "", entity.PRStatusDraft,
+		fmt.Sprintf("创建采购需求: %s", pr.Title), userID)
+
 	return pr, nil
 }
 
@@ -192,6 +209,7 @@ func (s *ProcurementService) ApprovePR(ctx context.Context, id, userID string) (
 	}
 
 	now := time.Now()
+	oldStatus := pr.Status
 	pr.Status = entity.PRStatusApproved
 	pr.ApprovedBy = &userID
 	pr.ApprovedAt = &now
@@ -199,6 +217,10 @@ func (s *ProcurementService) ApprovePR(ctx context.Context, id, userID string) (
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return nil, err
 	}
+
+	s.logActivity(ctx, "pr", pr.ID, pr.PRCode, "status_change", oldStatus, entity.PRStatusApproved,
+		"采购需求审批通过", userID)
+
 	return pr, nil
 }
 
@@ -459,6 +481,9 @@ func (s *ProcurementService) AssignSupplierToItem(ctx context.Context, prID, ite
 		return nil, fmt.Errorf("更新行项失败: %w", err)
 	}
 
+	s.logActivity(ctx, "pr_item", item.ID, "", "assign_supplier", "",
+		item.Status, fmt.Sprintf("为零件 %s 分配供应商", item.MaterialName), "")
+
 	return item, nil
 }
 
@@ -567,6 +592,11 @@ func (s *ProcurementService) GeneratePOsFromPR(ctx context.Context, prID, userID
 
 	if err != nil {
 		return nil, err
+	}
+
+	for _, po := range createdPOs {
+		s.logActivity(ctx, "po", po.ID, po.POCode, "create", "", entity.POStatusDraft,
+			fmt.Sprintf("从PR生成采购订单, 供应商ID: %s", po.SupplierID), userID)
 	}
 
 	return createdPOs, nil
@@ -712,6 +742,7 @@ func (s *ProcurementService) ApprovePO(ctx context.Context, id, userID string) (
 	}
 
 	now := time.Now()
+	oldStatus := po.Status
 	po.Status = entity.POStatusApproved
 	po.ApprovedBy = &userID
 	po.ApprovedAt = &now
@@ -719,6 +750,10 @@ func (s *ProcurementService) ApprovePO(ctx context.Context, id, userID string) (
 	if err := s.poRepo.Update(ctx, po); err != nil {
 		return nil, err
 	}
+
+	s.logActivity(ctx, "po", po.ID, po.POCode, "status_change", oldStatus, entity.POStatusApproved,
+		"采购订单审批通过", userID)
+
 	return po, nil
 }
 

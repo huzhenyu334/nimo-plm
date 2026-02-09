@@ -14,6 +14,7 @@ type Handlers struct {
 	PO         *POHandler
 	Inspection *InspectionHandler
 	Dashboard  *DashboardHandler
+	Project    *ProjectHandler
 }
 
 // NewHandlers 创建SRM处理器集合
@@ -23,6 +24,7 @@ func NewHandlers(
 	inspectionSvc *service.InspectionService,
 	dashboardSvc *service.DashboardService,
 	poRepo POItemReceiver,
+	projectSvc *service.SRMProjectService,
 ) *Handlers {
 	return &Handlers{
 		Supplier:   NewSupplierHandler(supplierSvc),
@@ -30,6 +32,7 @@ func NewHandlers(
 		PO:         NewPOHandler(procurementSvc, poRepo),
 		Inspection: NewInspectionHandler(inspectionSvc),
 		Dashboard:  NewDashboardHandler(dashboardSvc),
+		Project:    NewProjectHandler(projectSvc),
 	}
 }
 

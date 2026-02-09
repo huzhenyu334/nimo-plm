@@ -12,9 +12,10 @@ type MaterialCategory struct {
 	ParentID  string    `json:"parent_id" gorm:"size:32"`
 	Path      string    `json:"path" gorm:"size:256"`
 	Level     int       `json:"level" gorm:"not null;default:1"`
-	SortOrder int       `json:"sort_order" gorm:"not null;default:0"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	SortOrder           int       `json:"sort_order" gorm:"not null;default:0"`
+	DefaultLeadTimeDays *int      `json:"default_lead_time_days"` // 默认交期（天）
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 
 	// 关联
 	Parent   *MaterialCategory  `json:"parent,omitempty" gorm:"foreignKey:ParentID"`

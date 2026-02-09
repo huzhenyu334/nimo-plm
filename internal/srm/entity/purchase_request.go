@@ -12,9 +12,10 @@ type PurchaseRequest struct {
 	Status       string     `json:"status" gorm:"size:20;default:draft"`    // draft/pending/approved/sourcing/completed/cancelled
 
 	// 关联
-	ProjectID *string `json:"project_id" gorm:"size:32"`
-	BOMID     *string `json:"bom_id" gorm:"size:32"`
-	Phase     string  `json:"phase" gorm:"size:20"` // EVT/DVT/PVT/MP
+	ProjectID    *string `json:"project_id" gorm:"size:32"`       // PLM项目ID
+	SRMProjectID *string `json:"srm_project_id" gorm:"size:32"`   // SRM采购项目ID
+	BOMID        *string `json:"bom_id" gorm:"size:32"`
+	Phase        string  `json:"phase" gorm:"size:20"` // EVT/DVT/PVT/MP
 
 	// 需求信息
 	RequiredDate *time.Time `json:"required_date"`
@@ -80,6 +81,7 @@ type PRItem struct {
 	// 检验
 	InspectionResult string `json:"inspection_result" gorm:"size:20"` // passed/failed/conditional
 
+	Round     int       `json:"round" gorm:"default:1"`
 	SortOrder int       `json:"sort_order" gorm:"default:0"`
 	Notes     string    `json:"notes" gorm:"type:text"`
 	CreatedAt time.Time `json:"created_at"`

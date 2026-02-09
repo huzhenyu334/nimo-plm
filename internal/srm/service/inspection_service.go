@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/bitfantasy/nimo/internal/srm/entity"
@@ -12,8 +13,9 @@ import (
 
 // InspectionService 检验服务
 type InspectionService struct {
-	repo   *repository.InspectionRepository
-	prRepo *repository.PRRepository
+	repo            *repository.InspectionRepository
+	prRepo          *repository.PRRepository
+	activityLogRepo *repository.ActivityLogRepository
 }
 
 func NewInspectionService(repo *repository.InspectionRepository, prRepo *repository.PRRepository) *InspectionService {
@@ -21,6 +23,11 @@ func NewInspectionService(repo *repository.InspectionRepository, prRepo *reposit
 		repo:   repo,
 		prRepo: prRepo,
 	}
+}
+
+// SetActivityLogRepo 注入操作日志仓库
+func (s *InspectionService) SetActivityLogRepo(repo *repository.ActivityLogRepository) {
+	s.activityLogRepo = repo
 }
 
 // ListInspections 获取检验列表
@@ -105,6 +112,22 @@ func (s *InspectionService) CompleteInspection(ctx context.Context, id, userID s
 	if err := s.repo.Update(ctx, inspection); err != nil {
 		return nil, err
 	}
+
+	// 记录操作日志
+	if s.activityLogRepo != nil {
+		action := "inspect_pass"
+		content := fmt.Sprintf("检验通过: %s", inspection.MaterialName)
+		if req.Result == "failed" {
+			action = "inspect_fail"
+			content = fmt.Sprintf("检验不通过: %s", inspection.MaterialName)
+		} else if req.Result == "conditional" {
+			action = "inspect_conditional"
+			content = fmt.Sprintf("让步接收: %s", inspection.MaterialName)
+		}
+		s.activityLogRepo.LogActivity(ctx, "inspection", inspection.ID, inspection.InspectionCode,
+			action, "in_progress", "completed", content, userID, "")
+	}
+
 	return inspection, nil
 }
 

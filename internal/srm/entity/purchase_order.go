@@ -4,12 +4,16 @@ import "time"
 
 // PurchaseOrder 采购订单
 type PurchaseOrder struct {
-	ID         string     `json:"id" gorm:"primaryKey;size:32"`
-	POCode     string     `json:"po_code" gorm:"size:32;uniqueIndex;not null"`
-	SupplierID string     `json:"supplier_id" gorm:"size:32;not null;index"`
-	PRID       *string    `json:"pr_id" gorm:"size:32"`
-	Type       string     `json:"type" gorm:"size:20;not null"`     // sample/production
-	Status     string     `json:"status" gorm:"size:20;default:draft"` // draft/approved/sent/partial/received/completed/cancelled
+	ID           string     `json:"id" gorm:"primaryKey;size:32"`
+	POCode       string     `json:"po_code" gorm:"size:32;uniqueIndex;not null"`
+	SupplierID   string     `json:"supplier_id" gorm:"size:32;not null;index"`
+	PRID         *string    `json:"pr_id" gorm:"size:32"`
+	SRMProjectID *string    `json:"srm_project_id" gorm:"size:32"`
+	Type         string     `json:"type" gorm:"size:20;not null"`     // sample/production
+	Status       string     `json:"status" gorm:"size:20;default:draft"` // draft/approved/sent/partial/received/completed/cancelled
+	Round        int        `json:"round" gorm:"default:1"`
+	PrevPOID     *string    `json:"prev_po_id" gorm:"size:32"`     // 上一轮PO
+	Related8DID  *string    `json:"related_8d_id" gorm:"size:32"` // 关联8D改进单
 
 	// 金额
 	TotalAmount *float64 `json:"total_amount" gorm:"type:decimal(15,2)"`

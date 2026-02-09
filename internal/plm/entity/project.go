@@ -98,6 +98,9 @@ type Task struct {
 	Sequence       int        `json:"sequence" gorm:"not null;default:0"`
 	Level          int        `json:"level" gorm:"not null;default:0"`
 	Path           string     `json:"path" gorm:"size:512"`
+	// SRM桥接
+	LinkedSRMProjectID *string `json:"linked_srm_project_id" gorm:"size:32"`
+
 	// 新增字段
 	AutoStart              bool   `json:"auto_start" gorm:"default:false"`
 	RequiresApproval       bool   `json:"requires_approval" gorm:"default:false"`
@@ -179,9 +182,10 @@ const (
 
 // TaskType 任务类型
 const (
-	TaskTypeTask        = "task"
-	TaskTypeMilestone   = "milestone"
-	TaskTypeDeliverable = "deliverable"
+	TaskTypeTask            = "task"
+	TaskTypeMilestone       = "milestone"
+	TaskTypeDeliverable     = "deliverable"
+	TaskTypeSRMProcurement  = "srm_procurement"
 )
 
 // TaskPriority 任务优先级
