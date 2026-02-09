@@ -233,19 +233,84 @@ func NewMaterialHandler(svc *service.MaterialService) *MaterialHandler {
 	return &MaterialHandler{svc: svc}
 }
 
-func (h *MaterialHandler) List(c *gin.Context)           {
-	Success(c, gin.H{"materials": []interface{}{}})
+func (h *MaterialHandler) List(c *gin.Context) {
+	page, pageSize := GetPagination(c)
+	filters := map[string]interface{}{
+		"keyword":     c.Query("search"),
+		"category_id": c.Query("category"),
+		"status":      c.Query("status"),
+	}
+
+	result, err := h.svc.List(c.Request.Context(), page, pageSize, filters)
+	if err != nil {
+		InternalError(c, "获取物料列表失败: "+err.Error())
+		return
+	}
+
+	Success(c, result)
 }
-func (h *MaterialHandler) Create(c *gin.Context)         {
-	Success(c, gin.H{"message": "Material created"})
+
+func (h *MaterialHandler) Create(c *gin.Context) {
+	var req service.CreateMaterialRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "Invalid request body: "+err.Error())
+		return
+	}
+
+	userID := GetUserID(c)
+	material, err := h.svc.Create(c.Request.Context(), userID, &req)
+	if err != nil {
+		InternalError(c, "创建物料失败: "+err.Error())
+		return
+	}
+
+	Created(c, material)
 }
-func (h *MaterialHandler) Get(c *gin.Context)            {
+
+func (h *MaterialHandler) Get(c *gin.Context) {
 	id := c.Param("id")
-	Success(c, gin.H{"material_id": id})
+	if id == "" {
+		BadRequest(c, "Material ID is required")
+		return
+	}
+
+	material, err := h.svc.Get(c.Request.Context(), id)
+	if err != nil {
+		NotFound(c, "物料不存在")
+		return
+	}
+
+	Success(c, material)
 }
-func (h *MaterialHandler) Update(c *gin.Context)         {
-	Success(c, gin.H{"message": "Material updated"})
+
+func (h *MaterialHandler) Update(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		BadRequest(c, "Material ID is required")
+		return
+	}
+
+	var req service.UpdateMaterialRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "Invalid request body: "+err.Error())
+		return
+	}
+
+	material, err := h.svc.Update(c.Request.Context(), id, &req)
+	if err != nil {
+		InternalError(c, "更新物料失败: "+err.Error())
+		return
+	}
+
+	Success(c, material)
 }
+
 func (h *MaterialHandler) ListCategories(c *gin.Context) {
-	Success(c, gin.H{"categories": []interface{}{}})
+	categories, err := h.svc.ListCategories(c.Request.Context())
+	if err != nil {
+		InternalError(c, "获取物料类别失败: "+err.Error())
+		return
+	}
+
+	Success(c, gin.H{"categories": categories})
 }
