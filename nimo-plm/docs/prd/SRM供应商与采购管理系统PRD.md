@@ -1,8 +1,8 @@
 # nimo SRM 供应商与采购管理系统 PRD
 
-> 版本: v1.1 | 作者: Lyra | 日期: 2026-02-09
-> 状态: 待评审
-> v1.1更新: 融入数据驱动、业务闭环、风险预警设计理念；增加三单匹配、TCO模型、质量闭环、SRM/ERP分工原则
+> 版本: v2.0 | 作者: Lyra | 日期: 2026-02-09
+> 状态: 已确认核心架构
+> v2.0更新: 重大架构升级——采购项目化管理、PLM↔SRM桥接、交期刚性管控、看板+甘特图多视图、操作日志、文档驱动流程
 
 ---
 
@@ -10,943 +10,592 @@
 
 ### 1.1 背景
 
-nimo智能眼镜产品研发涉及大量零部件（结构件、电子元器件、光学组件、包装件等），从EVT到MP每个阶段都需要打样、验证、迭代。当前打样和采购流程依赖人工协调（飞书/Excel），存在以下痛点：
+nimo智能眼镜（~100个零件），从EVT到MP每个阶段都需要打样、验证、迭代。当前打样和采购流程依赖人工协调（飞书/Excel），痛点：
 
-- 打样进度难以追踪（50+零件分散在不同供应商）
+- 打样进度难以追踪（100个零件分散在不同供应商）
 - 供应商信息散落在个人文档中
 - 询价比价无标准流程
 - 来料检验结果未系统化记录
 - PLM的BOM变更无法自动通知采购侧
+- 打样退回重打无法系统化跟踪
 
 ### 1.2 目标
 
-建设轻量级SRM系统，实现：
+建设**采购项目管理平台**，实现：
 1. **供应商全生命周期管理**（准入→合作→评价→淘汰）
-2. **研发打样全流程在线化**（需求→寻源→下单→到货→检验）
-3. **与PLM无缝衔接**（BOM发布自动触发采购需求，检验结果回写PLM）
-4. **为ERP量产采购打基础**（供应商和价格数据复用）
+2. **采购项目化管理**（每个阶段的备料/打样是一个采购项目）
+3. **与PLM深度桥接**（BOM审批→自动创建采购项目，进度实时回传PLM）
+4. **交期刚性管控**（物料标准交期定死，延期必须审批）
+5. **流程精细化**（操作日志+多轮打样+异常处理全程可追溯）
 
 ### 1.3 设计原则
 
 **三大底层逻辑：**
 
-1. **数据驱动** — 供应商选择不靠感觉，靠360画像（交期达成率、来料合格率、价格竞争力、配合度评分）自动排名推荐
-2. **业务闭环** — 每个采购动作都有始有终：需求→寻源→下单→到货→检验→对账，任何断环都有预警
-3. **风险预警** — 交期超期自动提醒、来料不良率超阈值自动触发改进、供应商经营异常标记
+1. **数据驱动** — 供应商选择靠360画像自动排名，不靠感觉
+2. **业务闭环** — 每个采购动作有始有终，断环自动预警
+3. **风险预警** — 交期超期自动提醒、来料不良率超阈值自动触发改进
 
-**SRM与ERP的分工原则：**
+**流程管理方式：文档驱动（非任务驱动）**
 
-> **SRM算账，ERP记账。**
+> 采用Coupa/SAP Ariba模式——每种单据（PR/RFQ/PO/GR/IQC）是独立文档，有自己的状态机，文档之间通过引用关联。不搬PLM的任务引擎到SRM。
 
-| 维度 | SRM（外部协同） | ERP（内部管控） |
+| 维度 | 任务驱动（PLM模式） | 文档驱动（SRM采用） |
 |---|---|---|
-| 核心职能 | 和供应商达成共识 | 企业内部财务记账 |
-| 对账 | 三单匹配（PO+入库+对账单），双方确认 | 接收SRM确认后的数据，生成财务凭证 |
-| 价格 | 管合同价、报价、比价 | 管成本核算、应付账款 |
-| 供应商 | 管档案、评价、协同 | 只存编码和付款信息 |
+| 用户思维 | "完成任务" | "处理这张单" |
+| 灵活性 | 模板预定义 | 每张单独立流转 |
+| 异常处理 | 需动态插入任务 | 直接创建新文档 |
+| 多轮打样 | 同一任务回退 | 创建Round 2的PO |
+| 并行 | 需配置并行节点 | 天然并行 |
 
-**三单匹配校验逻辑（贯穿系统设计）：**
+**SRM与ERP的分工：SRM算账，ERP记账。**
 
-```
-采购订单(PO): 买了什么？多少钱？
-收货入库单(GR): 收了多少？有没有问题？
-对账单(Settlement): 最终结多少钱？（扣除退货、品质扣款等）
-```
-
-三单匹配通过 → 生成结算清单 → 供应商开票 → 推送ERP记账
-
-### 1.4 用户角色
-
-| 角色 | 职责 |
-|---|---|
-| 采购员 | 寻源、询价、下单、跟踪到货 |
-| 研发工程师 | 发起打样需求、参与来料检验 |
-| 品质工程师(IQC) | 来料检验、出具检验报告 |
-| 项目经理 | 查看打样进度、阶段评审 |
-| 管理层 | 供应商审批、采购审批、数据看板 |
+**三单匹配贯穿系统：** PO(买了什么) + GR(收了多少) + Settlement(结多少钱)
 
 ---
 
-## 2. 系统架构
+## 2. 核心架构：PLM ↔ SRM 桥接
 
-### 2.1 技术栈（复用PLM架构）
+### 2.1 采购项目概念
+
+**SRM以"采购项目"为核心管理单元**，每个采购项目对应PLM的一个阶段备料需求：
 
 ```
-前端: React + Ant Design + Vite（独立SPA，部署到 web/srm/）
+PLM 研发项目: Meteor智能眼镜
+├── EVT阶段
+│   ├── 原理图设计
+│   ├── PCB Layout
+│   ├── 结构设计 → 上传BOM → 审批通过
+│   ├── 🔗 EVT打样采购 ← PLM特殊任务，关联SRM
+│   │   └── 进度: 23/50通过(46%) ← 从SRM实时同步
+│   ├── EVT组装
+│   └── EVT测试
+├── DVT阶段
+│   ├── ...
+│   ├── 🔗 DVT备料采购
+│   └── ...
+├── PVT阶段
+│   └── 🔗 PVT备料采购
+└── MP阶段
+    └── 🔗 MP首批备料
+
+SRM 采购项目: Meteor EVT打样
+├── 零件1: 主板PCB      [已检验通过 ✓]
+├── 零件2: 外壳(上)     [第2轮打样中...]  ← Round 2
+├── 零件3: 外壳(下)     [已检验通过 ✓]
+├── 零件4: 光学棱镜     [供应商询价中]
+├── ...
+└── 零件50: 螺丝M1.2   [已检验通过 ✓]
+总进度: 23/50 → 自动回写PLM
+```
+
+### 2.2 桥接机制
+
+```sql
+-- SRM采购项目（新增核心表）
+CREATE TABLE srm_projects (
+    id              VARCHAR(32) PRIMARY KEY,
+    code            VARCHAR(32) UNIQUE NOT NULL,    -- SRMP-2026-0001
+    name            VARCHAR(200) NOT NULL,          -- "Meteor EVT打样采购"
+    type            VARCHAR(20) NOT NULL,           -- sample/production
+    phase           VARCHAR(20),                    -- EVT/DVT/PVT/MP
+    status          VARCHAR(20) DEFAULT 'active',   -- active/completed/cancelled
+    
+    -- PLM桥接
+    plm_project_id  VARCHAR(32),                    -- 关联PLM项目
+    plm_task_id     VARCHAR(32),                    -- 关联PLM采购任务
+    plm_bom_id      VARCHAR(32),                    -- 来源BOM
+    
+    -- 进度统计（定期更新）
+    total_items     INT DEFAULT 0,
+    sourcing_count  INT DEFAULT 0,                  -- 寻源中
+    ordered_count   INT DEFAULT 0,                  -- 已下单
+    received_count  INT DEFAULT 0,                  -- 已到货
+    passed_count    INT DEFAULT 0,                  -- 检验通过
+    failed_count    INT DEFAULT 0,                  -- 检验不通过
+    
+    -- 交期
+    estimated_days  INT,                            -- 整体预估交期（天）
+    start_date      DATE,                           -- 项目启动日期
+    target_date     DATE,                           -- 目标完成日期
+    actual_date     DATE,                           -- 实际完成日期
+    
+    created_by      VARCHAR(32) REFERENCES users(id),
+    created_at      TIMESTAMP DEFAULT NOW(),
+    updated_at      TIMESTAMP DEFAULT NOW()
+);
+```
+
+**PLM任务表扩展：**
+```sql
+ALTER TABLE tasks ADD COLUMN task_type VARCHAR(20) DEFAULT 'normal';
+-- task_type: 'normal' | 'srm_procurement'
+ALTER TABLE tasks ADD COLUMN linked_srm_project_id VARCHAR(32);
+```
+
+### 2.3 触发流程
+
+```
+BOM审批通过（PLM）
+    ↓
+PLM调用SRM: CreateProcurementProject({plm_project_id, bom_id, phase, items})
+    ↓
+SRM创建采购项目 + 采购需求(PR) + 零件清单
+    ↓
+SRM返回: {srm_project_id, estimated_days: null(待确认)}
+    ↓
+PLM自动创建/激活采购任务(task_type='srm_procurement', linked_srm_project_id=xxx)
+    ↓
+PLM采购任务工期: "待SRM确认"
+    ↓
+采购员在SRM选供应商 → 系统读取物料标准交期 → 计算整体周期
+    ↓
+SRM回写PLM: 更新采购任务工期和进度
+```
+
+**多个BOM独立触发**：电子BOM和结构BOM各自触发独立的采购流程，PLM聚合显示。
+
+### 2.4 进度同步
+
+PLM查询采购任务进度时，直接从SRM读取：
+
+```go
+func (s *ProjectService) GetTaskProgress(taskID string) TaskProgress {
+    task := s.taskRepo.FindByID(taskID)
+    if task.TaskType == "srm_procurement" && task.LinkedSRMProjectID != "" {
+        // 从SRM实时读取进度
+        srmProject := s.srmSvc.GetProject(task.LinkedSRMProjectID)
+        return TaskProgress{
+            Total:   srmProject.TotalItems,
+            Done:    srmProject.PassedCount,
+            Percent: srmProject.PassedCount * 100 / srmProject.TotalItems,
+            Status:  srmProject.Status,
+            Delays:  srmProject.GetDelayedItems(), // 超期零件列表
+        }
+    }
+    // 普通任务原有逻辑
+}
+```
+
+---
+
+## 3. 交期管理机制
+
+### 3.1 交期数据来源（三级优先级）
+
+```
+优先级1: 供应商+物料组合交期（最精确）
+  srm_supplier_materials.lead_time_days
+  例：供应商A + 外壳CNC = 18天
+
+优先级2: 具体物料交期
+  materials.lead_time_days
+  例：某颗特殊IC = 28天
+
+优先级3: 物料分类默认交期
+  material_categories.default_lead_time_days
+  例：电子-IC类 = 14天
+```
+
+```sql
+-- 物料分类加默认交期
+ALTER TABLE material_categories ADD COLUMN default_lead_time_days INT;
+
+-- 物料加交期
+ALTER TABLE materials ADD COLUMN lead_time_days INT;
+```
+
+### 3.2 交期刚性管控
+
+```
+原则：交期定死，延期必须审批
+
+SRM创建采购项目时：
+  → 系统自动根据物料属性计算每个零件的标准交期
+  → 整体采购周期 = max(所有零件交期)
+  → 回写PLM采购任务工期
+
+采购执行过程中：
+  → 距交期3天未下单 → 自动预警（飞书通知）
+  → 超期 → 采购员必须提交延期申请
+
+延期审批流程：
+  → 采购员填写：原因(供应商产能/设计变更/品质问题)、申请天数
+  → 采购主管审批
+  → 通过后更新交期 → PLM采购任务工期自动更新
+  → 自动通知研发PM："EVT打样采购延期5天，原因：外壳模具修模"
+```
+
+```sql
+-- 延期审批单
+CREATE TABLE srm_delay_requests (
+    id              VARCHAR(32) PRIMARY KEY,
+    srm_project_id  VARCHAR(32) REFERENCES srm_projects(id),
+    pr_item_id      VARCHAR(32),                    -- 哪个零件延期
+    material_name   VARCHAR(200),
+    original_days   INT,                            -- 原标准交期
+    requested_days  INT,                            -- 申请延长到多少天
+    reason          TEXT,                            -- 延期原因
+    reason_type     VARCHAR(50),                    -- supplier_capacity/design_change/quality_issue/other
+    status          VARCHAR(20) DEFAULT 'pending',  -- pending/approved/rejected
+    requested_by    VARCHAR(32) REFERENCES users(id),
+    approved_by     VARCHAR(32) REFERENCES users(id),
+    created_at      TIMESTAMP DEFAULT NOW(),
+    approved_at     TIMESTAMP
+);
+```
+
+---
+
+## 4. 操作日志（审计轨迹）
+
+### 4.1 通用日志表
+
+所有SRM文档共享一张操作日志表，记录每次操作：
+
+```sql
+CREATE TABLE srm_activity_logs (
+    id              VARCHAR(32) PRIMARY KEY,
+    entity_type     VARCHAR(50) NOT NULL,           -- 'project'/'pr'/'po'/'inspection'/'supplier'/'8d'
+    entity_id       VARCHAR(32) NOT NULL,           -- 关联的文档ID
+    entity_code     VARCHAR(50),                    -- 文档编码（方便显示）
+    
+    action          VARCHAR(50) NOT NULL,           -- 操作类型
+    from_status     VARCHAR(20),                    -- 变更前状态
+    to_status       VARCHAR(20),                    -- 变更后状态
+    
+    content         TEXT,                           -- 操作描述/评论内容
+    attachments     JSONB,                          -- 附件 [{name, url, size}]
+    metadata        JSONB,                          -- 额外数据（如价格变更的新旧值）
+    
+    operator_id     VARCHAR(32) REFERENCES users(id),
+    operator_name   VARCHAR(100),
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_activity_entity ON srm_activity_logs(entity_type, entity_id);
+```
+
+**操作类型示例：**
+
+| entity_type | action | content示例 |
+|---|---|---|
+| pr | create | "从PLM BOM自动创建采购需求" |
+| pr | assign_supplier | "将零件A分配给供应商-精密模具" |
+| po | create | "从PR-2026-001生成采购订单" |
+| po | send | "PO已发送给供应商" |
+| po | receive | "收货5件" |
+| inspection | fail | "检验不通过：尺寸超差+0.05mm" |
+| inspection | pass | "检验通过" |
+| 8d | create | "自动创建8D改进单" |
+| po | reorder | "第2轮打样下单（关联8D-001）" |
+| pr_item | delay_request | "申请延期：外壳交期从21天延至35天" |
+| pr_item | delay_approved | "延期审批通过" |
+
+### 4.2 评论功能
+
+每个文档支持添加评论（像GitHub Issue的评论时间线）：
+
+```
+操作日志 action='comment' 即为评论
+支持附件（照片、检验报告、供应商邮件截图等）
+```
+
+---
+
+## 5. 多轮打样管理
+
+### 5.1 文档关联链
+
+打样不是一次性的，一个零件可能打多轮：
+
+```
+零件A: 外壳(上)
+├── Round 1: 
+│   PO-001(供应商X) → GR-001(收货) → IQC-001(不通过：尺寸超差)
+│   → 8D-001(要求供应商修模)
+├── Round 2:
+│   PO-005(供应商X, 修模后重打) → GR-003(收货) → IQC-004(不通过：表面处理)
+│   → 8D-002(表面工艺调整)
+└── Round 3:
+    PO-009(供应商Y, 换供应商) → GR-006(收货) → IQC-007(通过 ✓)
+```
+
+**数据模型支持：**
+
+```sql
+-- PR行项增加轮次字段
+ALTER TABLE srm_pr_items ADD COLUMN round INT DEFAULT 1;
+
+-- PO增加关联字段
+ALTER TABLE srm_purchase_orders ADD COLUMN srm_project_id VARCHAR(32);
+ALTER TABLE srm_purchase_orders ADD COLUMN round INT DEFAULT 1;
+ALTER TABLE srm_purchase_orders ADD COLUMN prev_po_id VARCHAR(32);  -- 上一轮PO
+ALTER TABLE srm_purchase_orders ADD COLUMN related_8d_id VARCHAR(32); -- 关联的8D改进单
+```
+
+### 5.2 异常处理流程
+
+```
+检验不通过
+    ↓
+自动创建8D改进单 → 飞书通知采购员+供应商
+    ↓
+供应商回复改进措施（或采购员手动录入）
+    ↓
+采购员决策：
+  ├── 同供应商重打 → 创建Round N+1 PO（关联8D）
+  ├── 换供应商 → 重新寻源 → 创建新PO
+  └── 让步接收 → 标记conditional，流程继续
+    ↓
+重新到货 → 重新检验 → 通过/继续循环
+```
+
+---
+
+## 6. 数据展现方式（多视图）
+
+### 6.1 看板视图（Kanban）— 采购员核心工作台 ⭐
+
+```
+┌──────────┬──────────┬──────────┬──────────┬──────────┬──────────┐
+│ 待询价(8) │ 已询价(5) │ 已下单(12)│ 已发货(6) │ 检验中(4) │ 已通过(15)│
+├──────────┼──────────┼──────────┼──────────┼──────────┼──────────┤
+│ 光学棱镜  │ 主板PCB   │ 外壳(上)  │ 排线A    │ 电池     │ 螺丝M1   │
+│ ⏰21天   │ ⏰还剩5天 │ ⏰还剩8天 │ 明天到货  │ 待检中   │ ✓通过    │
+│ 🔴超期!  │ 供应商A   │ R2-供应商B│ 供应商C   │ IQC:赵六 │ 2/8通过  │
+│          │          │          │          │          │          │
+│ 喇叭     │ 镜片      │ FPC      │          │ IC芯片   │ 电容x20  │
+│ 🔴超期3天│ ⏰还剩12天│ ...      │          │ 🟡快超期 │ ✓通过    │
+└──────────┴──────────┴──────────┴──────────┴──────────┴──────────┘
+```
+
+- 每个零件是一张卡片，显示：物料名、交期倒计时、供应商、轮次、预警色
+- 卡片颜色：🔴红=超期 🟡黄=即将超期(≤3天) 🟢绿=正常 ⚪白=未开始
+- 可按供应商/物料分类/优先级筛选
+
+### 6.2 甘特图视图 — 项目经理/管理层看时间线
+
+```
+零件              2/1   2/8   2/15  2/22  3/1   3/8
+──────────────────┼─────┼─────┼─────┼─────┼─────┤
+主板PCB           ██████████████■                      ✓
+外壳(上) R1       ████████████████████ ✗(不通过)
+外壳(上) R2                          ████████████████  进行中
+光学棱镜                ░░░░░░░░░░░░░░░░░░░░░░░░       未开始
+电池              ████████████████████■                 ✓
+FPC排线           ██████████████████████████░░░░        快到期
+──────────────────┼─────┼─────┼─────┼─────┼─────┤
+                  ██=已完成  ░░=进行中  ■=节点
+```
+
+- 每个零件一行（多轮显示多行）
+- 横轴时间，标准交期线标记
+- 关键路径高亮：最慢零件决定整体进度
+
+### 6.3 表格视图 — 明细查询和导出
+
+传统表格用于搜索/筛选/导出Excel。
+
+### 6.4 仪表盘视图 — 管理层概览
+
+统计卡片 + 进度环形图 + 关键预警列表。
+
+### 6.5 角色默认视图
+
+| 角色 | 默认视图 | 原因 |
+|---|---|---|
+| 采购员 | 看板 | 日常推进，关注"下一步做什么" |
+| 采购经理 | 甘特图 | 管控时间线和风险 |
+| 研发PM | PLM内概览 | 只看进度百分比+预警 |
+| 管理层 | 仪表盘 | 看数字和趋势 |
+
+---
+
+## 7. 功能模块详细设计
+
+### 7.1 M1: 供应商管理
+
+（同v1.1，包含：供应商档案、360画像标签、联系人、可供物料、准入审批、分类等级）
+
+### 7.2 M2: 采购项目管理（新增核心模块）
+
+采购项目是SRM的核心管理单元：
+
+```
+采购项目 1:N 采购需求(PR)
+采购需求 1:N PR行项
+PR行项 1:N 采购订单(PO)  ← 多轮打样
+PO 1:N 收货记录
+收货记录 1:1 检验记录
+检验记录 1:1 8D改进单（如果不通过）
+```
+
+### 7.3 M3: 采购需求(PR)
+
+从PLM BOM自动生成或手动创建。状态机：
+
+```
+draft → pending → approved → sourcing → completed
+                                ↑ 部分零件完成后仍在sourcing
+```
+
+### 7.4 M4: 寻源与询价(RFQ)
+
+询价 → 报价 → TCO比价 → 定源。金额超阈值需审批。
+
+### 7.5 M5: 采购订单(PO)
+
+创建 → 审批 → 发送 → 到货 → 完成。支持多轮(round字段)。
+
+### 7.6 M6: 来料检验(IQC) + 8D质量闭环
+
+检验 → 通过/不通过。不通过自动触发8D改进单。
+
+### 7.7 M7: 对账与结算
+
+三单匹配 → 对账 → 结算清单 → 推送ERP。
+
+### 7.8 M8: 看板与报表
+
+看板(Kanban) + 甘特图 + 仪表盘 + 表格，多视图切换。
+
+---
+
+## 8. 技术架构
+
+### 8.1 技术栈（复用PLM）
+
+```
+前端: React + Ant Design + Vite（与PLM共享同一SPA）
+看板: @hello-pangea/dnd（拖拽看板）
+甘特图: gantt-task-react 或 frappe-gantt
 后端: Pure Go (Gin + GORM)
-数据库: PostgreSQL（与PLM共享实例，独立schema或表前缀）
-认证: 飞书SSO（复用PLM的飞书登录）
+数据库: PostgreSQL（与PLM共享实例）
+认证: 飞书SSO（复用PLM）
 通知: 飞书消息卡片
 ```
 
-### 2.2 服务架构
+### 8.2 服务架构：单体服务
+
+PLM和SRM在同一个Go二进制中，通过内部Service调用集成。
+
+### 8.3 代码组织
 
 ```
-                    ┌──────────────┐
-                    │   Nginx/Go   │
-                    │  静态文件服务  │
-                    └──────┬───────┘
-                           │
-              ┌────────────┼────────────┐
-              │            │            │
-         web/plm/     web/srm/     web/erp/
-         (PLM前端)    (SRM前端)    (ERP前端)
-              │            │            │
-              └────────────┼────────────┘
-                           │
-                    ┌──────┴───────┐
-                    │   Go服务      │
-                    │ /api/v1/plm  │
-                    │ /api/v1/srm  │
-                    │ /api/v1/erp  │
-                    └──────┬───────┘
-                           │
-                    ┌──────┴───────┐
-                    │  PostgreSQL   │
-                    │  共享物料库    │
-                    │  PLM表 + SRM表│
-                    └──────────────┘
-```
-
-**关键决策：单体服务 vs 微服务**
-
-推荐**单体服务**（一个Go二进制），理由：
-- 团队20人，不需要微服务复杂度
-- 共享物料库直接内存调用，无需API/消息队列
-- 部署运维简单（一台服务器）
-- 后期如果需要拆分，按Go package拆即可
-
-### 2.3 与PLM的集成方式
-
-由于是同一个Go服务，PLM和SRM之间通过**内部Service调用**集成（非HTTP/消息队列）：
-
-```go
-// PLM侧：BOM审批通过后
-func (s *ApprovalService) Approve(...) {
-    // ... 审批通过 ...
-    // 通知SRM创建采购需求
-    if s.srmSvc != nil {
-        go s.srmSvc.CreatePRFromBOM(ctx, projectID, bomID, userID)
-    }
-}
-
-// SRM侧：检验完成后回写PLM
-func (s *InspectionService) Complete(...) {
-    // ... 检验完成 ...
-    // 回写PLM物料验证状态
-    if s.plmSvc != nil {
-        s.plmSvc.UpdateMaterialValidation(ctx, materialID, result)
-    }
-}
+internal/srm/
+├── entity/
+│   ├── project.go              # 采购项目
+│   ├── supplier.go             # 供应商+联系人+可供物料
+│   ├── purchase_request.go     # 采购需求+行项
+│   ├── rfq.go                  # 询价+报价
+│   ├── purchase_order.go       # 采购订单+行项
+│   ├── inspection.go           # 检验+8D改进
+│   ├── settlement.go           # 对账+结算
+│   ├── delay_request.go        # 延期审批
+│   └── activity_log.go         # 操作日志
+├── repository/
+├── service/
+│   ├── project_service.go      # 采购项目管理+进度计算
+│   ├── supplier_service.go     # 供应商管理+评分
+│   ├── procurement_service.go  # PR+PO管理
+│   ├── inspection_service.go   # 检验+8D
+│   ├── settlement_service.go   # 对账
+│   └── dashboard_service.go    # 看板数据聚合
+└── handler/
 ```
 
 ---
 
-## 3. 功能模块设计
-
-### 3.1 模块总览
-
-```
-SRM系统
-├── M1: 供应商管理
-│   ├── 供应商档案（基本信息、资质、联系人）
-│   ├── 供应商准入审批
-│   ├── 供应商分类（结构件/电子/光学/包装）
-│   └── 供应商评价
-│
-├── M2: 采购需求管理
-│   ├── 采购需求(PR)（从PLM BOM自动生成或手动创建）
-│   ├── 需求审批
-│   └── 需求合并
-│
-├── M3: 寻源与询价
-│   ├── 询价单(RFQ)（发送给供应商）
-│   ├── 报价管理（供应商回复报价）
-│   ├── 比价分析
-│   └── 定源决策
-│
-├── M4: 采购订单
-│   ├── 采购单(PO)
-│   ├── PO审批
-│   ├── 到货跟踪
-│   └── 收货确认
-│
-├── M5: 来料检验(IQC)
-│   ├── 检验任务（自动生成）
-│   ├── 检验记录
-│   ├── 检验报告
-│   └── 结果回写PLM
-│
-├── M6: 对账与结算
-│   ├── 自动对账（三单匹配：PO + 入库 + 扣款）
-│   ├── 对账差异处理（在线申诉）
-│   ├── 结算清单生成
-│   └── 推送ERP记账
-│
-└── M7: 看板与报表
-    ├── 打样进度看板（按项目/阶段）
-    ├── 供应商绩效看板
-    └── 采购统计
-```
-
-### 3.2 M1: 供应商管理
-
-#### 3.2.1 供应商档案
-
-**数据模型：**
-
-```sql
--- 供应商主表
-CREATE TABLE srm_suppliers (
-    id              VARCHAR(32) PRIMARY KEY,
-    code            VARCHAR(32) UNIQUE NOT NULL,    -- 供应商编码 SUP-001
-    name            VARCHAR(200) NOT NULL,          -- 公司名称
-    short_name      VARCHAR(50),                    -- 简称
-    category        VARCHAR(50) NOT NULL,           -- 分类: structural/electronic/optical/packaging/other
-    level           VARCHAR(20) DEFAULT 'potential', -- 等级: potential/qualified/preferred/strategic
-    status          VARCHAR(20) DEFAULT 'pending',  -- 状态: pending/active/suspended/blacklisted
-    
-    -- 基本信息
-    country         VARCHAR(50),
-    province        VARCHAR(50),
-    city            VARCHAR(50),
-    address         VARCHAR(500),
-    website         VARCHAR(200),
-    
-    -- 业务信息
-    business_scope  TEXT,                           -- 经营范围/主营产品
-    annual_revenue  DECIMAL(15,2),                  -- 年营业额（万元）
-    employee_count  INT,                            -- 员工人数
-    factory_area    DECIMAL(10,2),                  -- 厂房面积（㎡）
-    certifications  JSONB,                          -- 资质证书 [{name, expiry_date, file_url}]
-    
-    -- 付款信息
-    bank_name       VARCHAR(200),
-    bank_account    VARCHAR(50),
-    tax_id          VARCHAR(50),                    -- 税号
-    payment_terms   VARCHAR(100),                   -- 付款条件（如NET30）
-    
-    -- 360画像标签
-    tags            JSONB,                          -- 自定义标签 ["响应快","价格有优势","技术能力强"]
-    tech_capability VARCHAR(20),                    -- 技术能力: low/medium/high/expert
-    cooperation     VARCHAR(20),                    -- 配合度: poor/fair/good/excellent
-    capacity_limit  VARCHAR(200),                   -- 产能上限描述
-    
-    -- 自动计算的绩效指标（定期更新）
-    quality_score   DECIMAL(5,2),                   -- 来料合格率 (0-100)
-    delivery_score  DECIMAL(5,2),                   -- 交期达成率 (0-100)
-    price_score     DECIMAL(5,2),                   -- 价格竞争力 (0-100)
-    overall_score   DECIMAL(5,2),                   -- 综合评分 (加权平均)
-    
-    -- 管理信息
-    created_by      VARCHAR(32) REFERENCES users(id),
-    approved_by     VARCHAR(32) REFERENCES users(id),
-    approved_at     TIMESTAMP,
-    created_at      TIMESTAMP DEFAULT NOW(),
-    updated_at      TIMESTAMP DEFAULT NOW(),
-    notes           TEXT
-);
-
--- 供应商联系人
-CREATE TABLE srm_supplier_contacts (
-    id              VARCHAR(32) PRIMARY KEY,
-    supplier_id     VARCHAR(32) REFERENCES srm_suppliers(id),
-    name            VARCHAR(100) NOT NULL,
-    title           VARCHAR(100),                   -- 职务
-    phone           VARCHAR(50),
-    email           VARCHAR(200),
-    wechat          VARCHAR(100),
-    is_primary      BOOLEAN DEFAULT false,          -- 主联系人
-    created_at      TIMESTAMP DEFAULT NOW()
-);
-
--- 供应商可供物料（供应商能供应哪些品类）
-CREATE TABLE srm_supplier_materials (
-    id              VARCHAR(32) PRIMARY KEY,
-    supplier_id     VARCHAR(32) REFERENCES srm_suppliers(id),
-    category_id     VARCHAR(32),                    -- 关联PLM物料分类
-    material_id     VARCHAR(32),                    -- 关联PLM具体物料（可选）
-    lead_time_days  INT,                            -- 交期（天）
-    moq             INT,                            -- 最小起订量
-    unit_price      DECIMAL(12,4),                  -- 单价
-    currency        VARCHAR(10) DEFAULT 'CNY',
-    notes           TEXT,
-    created_at      TIMESTAMP DEFAULT NOW()
-);
-```
-
-#### 3.2.2 供应商准入流程
-
-```
-录入供应商信息 → 提交准入申请 → 管理层审批 → 成为合格供应商
-                                    ↓ 驳回
-                              补充资料/淘汰
-```
-
-准入审批复用PLM的审批引擎（ApprovalService），审批类型为 `supplier_qualification`。
-
-#### 3.2.3 供应商分类与等级
-
-**分类**（对应物料大类）：
-- 结构件供应商（CNC/模具/注塑/钣金）
-- 电子元器件供应商（被动/主动/连接器/PCB）
-- 光学组件供应商（镜片/棱镜/波导）
-- 包装件供应商
-- 辅料供应商
-
-**等级**（动态调整）：
-- 潜在供应商（Potential）— 刚录入，未审核
-- 合格供应商（Qualified）— 通过准入审批
-- 优选供应商（Preferred）— 绩效优秀，优先选用
-- 战略供应商（Strategic）— 核心供应商，长期合作
-
-### 3.3 M2: 采购需求管理
-
-#### 3.3.1 采购需求(PR)
-
-采购需求有两种来源：
-
-**来源A：PLM BOM自动生成**
-
-当PLM中BOM审批通过（或阶段评审通过），系统自动为BOM中的零件生成采购需求。
-
-```sql
--- 采购需求单
-CREATE TABLE srm_purchase_requests (
-    id              VARCHAR(32) PRIMARY KEY,
-    pr_code         VARCHAR(32) UNIQUE NOT NULL,    -- PR编码 PR-2026-001
-    title           VARCHAR(200) NOT NULL,
-    type            VARCHAR(20) NOT NULL,           -- sample(打样) / production(量产)
-    priority        VARCHAR(20) DEFAULT 'normal',   -- urgent/high/normal/low
-    status          VARCHAR(20) DEFAULT 'draft',    -- draft/pending/approved/sourcing/completed/cancelled
-    
-    -- 关联
-    project_id      VARCHAR(32),                    -- 关联PLM项目
-    bom_id          VARCHAR(32),                    -- 关联PLM BOM
-    phase           VARCHAR(20),                    -- EVT/DVT/PVT/MP
-    
-    -- 需求信息
-    required_date   DATE,                           -- 需求日期
-    
-    -- 管理
-    requested_by    VARCHAR(32) REFERENCES users(id),
-    approved_by     VARCHAR(32) REFERENCES users(id),
-    approved_at     TIMESTAMP,
-    created_at      TIMESTAMP DEFAULT NOW(),
-    updated_at      TIMESTAMP DEFAULT NOW(),
-    notes           TEXT
-);
-
--- 采购需求行项
-CREATE TABLE srm_pr_items (
-    id              VARCHAR(32) PRIMARY KEY,
-    pr_id           VARCHAR(32) REFERENCES srm_purchase_requests(id),
-    
-    -- 物料信息（从PLM同步）
-    material_id     VARCHAR(32),                    -- 关联PLM物料
-    material_code   VARCHAR(50),
-    material_name   VARCHAR(200) NOT NULL,
-    specification   VARCHAR(500),
-    category        VARCHAR(100),
-    
-    -- 需求数量
-    quantity        DECIMAL(10,2) NOT NULL,
-    unit            VARCHAR(20) DEFAULT 'pcs',
-    
-    -- 采购进度
-    status          VARCHAR(20) DEFAULT 'pending',  -- pending/sourcing/ordered/received/inspected/completed
-    supplier_id     VARCHAR(32),                    -- 选定供应商
-    unit_price      DECIMAL(12,4),
-    total_amount    DECIMAL(15,2),
-    
-    -- 交期
-    expected_date   DATE,
-    actual_date     DATE,
-    
-    -- 检验
-    inspection_result VARCHAR(20),                  -- passed/failed/conditional
-    
-    sort_order      INT DEFAULT 0,
-    notes           TEXT,
-    created_at      TIMESTAMP DEFAULT NOW(),
-    updated_at      TIMESTAMP DEFAULT NOW()
-);
-```
-
-**来源B：手动创建**
-
-采购员手动创建PR（非BOM关联的采购，如工具、设备、样品补充等）。
-
-#### 3.3.2 PLM → SRM 自动推送逻辑
-
-```
-触发条件：PLM BOM审批通过
-    ↓
-遍历BOM行项
-    ↓
-过滤：跳过已有采购需求的物料（防重复）
-    ↓
-生成PR + PR Items
-    ↓
-飞书通知采购员："项目XXX的EVT BOM已通过审批，请处理采购需求 PR-2026-001"
-```
-
-### 3.4 M3: 寻源与询价
-
-#### 3.4.1 询价单(RFQ)
-
-```sql
--- 询价单
-CREATE TABLE srm_rfqs (
-    id              VARCHAR(32) PRIMARY KEY,
-    rfq_code        VARCHAR(32) UNIQUE NOT NULL,    -- RFQ-2026-001
-    pr_id           VARCHAR(32) REFERENCES srm_purchase_requests(id),
-    title           VARCHAR(200) NOT NULL,
-    status          VARCHAR(20) DEFAULT 'draft',    -- draft/sent/quoted/evaluated/decided
-    
-    deadline        TIMESTAMP,                      -- 报价截止时间
-    created_by      VARCHAR(32) REFERENCES users(id),
-    created_at      TIMESTAMP DEFAULT NOW(),
-    updated_at      TIMESTAMP DEFAULT NOW(),
-    notes           TEXT
-);
-
--- 询价单发送记录（发给哪些供应商）
-CREATE TABLE srm_rfq_suppliers (
-    id              VARCHAR(32) PRIMARY KEY,
-    rfq_id          VARCHAR(32) REFERENCES srm_rfqs(id),
-    supplier_id     VARCHAR(32) REFERENCES srm_suppliers(id),
-    status          VARCHAR(20) DEFAULT 'pending',  -- pending/quoted/declined
-    quoted_at       TIMESTAMP,
-    notes           TEXT
-);
-
--- 报价明细
-CREATE TABLE srm_quotations (
-    id              VARCHAR(32) PRIMARY KEY,
-    rfq_id          VARCHAR(32) REFERENCES srm_rfqs(id),
-    supplier_id     VARCHAR(32) REFERENCES srm_suppliers(id),
-    pr_item_id      VARCHAR(32) REFERENCES srm_pr_items(id),
-    
-    unit_price      DECIMAL(12,4),
-    currency        VARCHAR(10) DEFAULT 'CNY',
-    lead_time_days  INT,                            -- 交期（天）
-    moq             INT,                            -- 最小起订量
-    tooling_cost    DECIMAL(12,2),                  -- 模具费/开版费
-    sample_cost     DECIMAL(12,2),                  -- 打样费
-    
-    is_selected     BOOLEAN DEFAULT false,          -- 是否选中（定源）
-    notes           TEXT,
-    created_at      TIMESTAMP DEFAULT NOW()
-);
-```
-
-#### 3.4.2 比价与定源（TCO总拥有成本模型）
-
-不只看单价，用**总拥有成本(TCO)**模型做决策：
-
-```
-TCO = 单价×数量 + 模具费分摊 + 物流成本 + 账期资金占用成本
-
-模具费分摊 = 模具费 ÷ 预估总用量（EVT+DVT+PVT+MP首批）
-账期资金占用 = 总金额 × 年利率 × 账期天数 ÷ 365
-```
-
-比价页面展示：
-- 各供应商的单价、交期、MOQ、模具费
-- **系统自动计算TCO**，按TCO排序推荐
-- 同时展示供应商360画像评分（质量/交期/配合度）
-- 采购员选定供应商，标记 `is_selected = true`
-- 如果金额超过阈值，需要审批
-
-### 3.5 M4: 采购订单(PO)
-
-```sql
--- 采购订单
-CREATE TABLE srm_purchase_orders (
-    id              VARCHAR(32) PRIMARY KEY,
-    po_code         VARCHAR(32) UNIQUE NOT NULL,    -- PO-2026-001
-    supplier_id     VARCHAR(32) REFERENCES srm_suppliers(id),
-    pr_id           VARCHAR(32),                    -- 关联PR
-    type            VARCHAR(20) NOT NULL,           -- sample/production
-    status          VARCHAR(20) DEFAULT 'draft',    -- draft/approved/sent/partial/received/completed/cancelled
-    
-    -- 金额
-    total_amount    DECIMAL(15,2),
-    currency        VARCHAR(10) DEFAULT 'CNY',
-    
-    -- 交期
-    expected_date   DATE,
-    actual_date     DATE,
-    
-    -- 收货与付款
-    shipping_address VARCHAR(500),
-    payment_terms   VARCHAR(100),
-    
-    -- 管理
-    created_by      VARCHAR(32) REFERENCES users(id),
-    approved_by     VARCHAR(32) REFERENCES users(id),
-    approved_at     TIMESTAMP,
-    created_at      TIMESTAMP DEFAULT NOW(),
-    updated_at      TIMESTAMP DEFAULT NOW(),
-    notes           TEXT
-);
-
--- PO行项
-CREATE TABLE srm_po_items (
-    id              VARCHAR(32) PRIMARY KEY,
-    po_id           VARCHAR(32) REFERENCES srm_purchase_orders(id),
-    pr_item_id      VARCHAR(32),                    -- 关联PR行项
-    material_id     VARCHAR(32),
-    material_code   VARCHAR(50),
-    material_name   VARCHAR(200) NOT NULL,
-    specification   VARCHAR(500),
-    
-    quantity        DECIMAL(10,2) NOT NULL,
-    unit            VARCHAR(20) DEFAULT 'pcs',
-    unit_price      DECIMAL(12,4),
-    total_amount    DECIMAL(15,2),
-    
-    -- 收货
-    received_qty    DECIMAL(10,2) DEFAULT 0,
-    status          VARCHAR(20) DEFAULT 'pending',  -- pending/shipped/partial/received
-    
-    sort_order      INT DEFAULT 0,
-    notes           TEXT,
-    created_at      TIMESTAMP DEFAULT NOW(),
-    updated_at      TIMESTAMP DEFAULT NOW()
-);
-```
-
-#### 3.5.1 PO到货跟踪
-
-```
-PO发出 → 供应商确认 → 发货（填运单号）→ 到货签收 → 自动创建IQC检验任务
-```
-
-到货时自动更新PR行项状态为 `received`。
-
-### 3.6 M5: 来料检验(IQC)
-
-```sql
--- 检验任务
-CREATE TABLE srm_inspections (
-    id              VARCHAR(32) PRIMARY KEY,
-    inspection_code VARCHAR(32) UNIQUE NOT NULL,    -- IQC-2026-001
-    po_id           VARCHAR(32) REFERENCES srm_purchase_orders(id),
-    po_item_id      VARCHAR(32),
-    supplier_id     VARCHAR(32),
-    
-    material_id     VARCHAR(32),
-    material_code   VARCHAR(50),
-    material_name   VARCHAR(200),
-    
-    -- 检验信息
-    quantity        DECIMAL(10,2),                  -- 送检数量
-    sample_qty      INT,                            -- 抽样数量
-    status          VARCHAR(20) DEFAULT 'pending',  -- pending/in_progress/completed
-    result          VARCHAR(20),                    -- passed/failed/conditional(让步接收)
-    
-    -- 检验详情
-    inspection_items JSONB,                         -- 检验项 [{name, standard, actual, result}]
-    report_url      VARCHAR(500),                   -- 检验报告附件
-    
-    -- 人员
-    inspector_id    VARCHAR(32) REFERENCES users(id),
-    inspected_at    TIMESTAMP,
-    
-    created_at      TIMESTAMP DEFAULT NOW(),
-    updated_at      TIMESTAMP DEFAULT NOW(),
-    notes           TEXT
-);
-```
-
-#### 3.6.1 检验结果处理
-
-```
-检验通过 → 更新PR行项状态为 completed → 回写PLM物料验证状态
-检验不通过 → 退货/让步接收
-           → 自动发起8D改进单（通知供应商）
-           → 通知研发工程师
-           → 如需修改设计 → 触发PLM ECN流程
-```
-
-#### 3.6.2 质量闭环（8D改进）
-
-```sql
--- 8D改进单
-CREATE TABLE srm_corrective_actions (
-    id              VARCHAR(32) PRIMARY KEY,
-    ca_code         VARCHAR(32) UNIQUE NOT NULL,    -- 8D-2026-001
-    inspection_id   VARCHAR(32) REFERENCES srm_inspections(id),
-    supplier_id     VARCHAR(32) REFERENCES srm_suppliers(id),
-    
-    -- 问题描述
-    problem_desc    TEXT NOT NULL,
-    severity        VARCHAR(20),                    -- critical/major/minor
-    
-    -- 8D流程
-    status          VARCHAR(20) DEFAULT 'open',     -- open/responded/verified/closed
-    root_cause      TEXT,                           -- 供应商填：根本原因
-    corrective_action TEXT,                         -- 供应商填：纠正措施
-    preventive_action TEXT,                         -- 供应商填：预防措施
-    
-    -- 时间要求
-    response_deadline TIMESTAMP,                    -- 回复截止时间
-    responded_at    TIMESTAMP,
-    verified_at     TIMESTAMP,
-    closed_at       TIMESTAMP,
-    
-    created_by      VARCHAR(32) REFERENCES users(id),
-    created_at      TIMESTAMP DEFAULT NOW(),
-    updated_at      TIMESTAMP DEFAULT NOW()
-);
-```
-
-**闭环逻辑：**
-- 检验不通过 → 自动创建8D改进单 → 飞书通知供应商（如有门户）
-- 供应商超期未回复 → 系统标记预警，限制该供应商的新PO创建
-- 改进措施验证通过 → 解除限制，更新供应商质量评分
-- 同一供应商累计3次不良 → 自动降级（优选→合格→潜在）
-
-#### 3.6.3 回写PLM
-
-检验完成后，SRM自动回写PLM：
-- 更新 `project_bom_items` 的验证状态字段
-- 更新 `materials` 表的验证信息
-- 关联检验报告到PLM项目文档
-
-### 3.7 M6: 对账与结算
-
-```sql
--- 对账单
-CREATE TABLE srm_settlements (
-    id              VARCHAR(32) PRIMARY KEY,
-    settlement_code VARCHAR(32) UNIQUE NOT NULL,    -- STL-2026-001
-    supplier_id     VARCHAR(32) REFERENCES srm_suppliers(id),
-    period_start    DATE,                           -- 对账周期开始
-    period_end      DATE,                           -- 对账周期结束
-    status          VARCHAR(20) DEFAULT 'draft',    -- draft/confirmed/invoiced/paid
-    
-    -- 金额
-    po_amount       DECIMAL(15,2),                  -- PO总金额
-    received_amount DECIMAL(15,2),                  -- 实收金额（按实际收货数量）
-    deduction       DECIMAL(15,2) DEFAULT 0,        -- 扣款（品质扣款、退货等）
-    final_amount    DECIMAL(15,2),                  -- 最终结算金额
-    currency        VARCHAR(10) DEFAULT 'CNY',
-    
-    -- 发票
-    invoice_no      VARCHAR(100),
-    invoice_amount  DECIMAL(15,2),
-    invoice_url     VARCHAR(500),
-    
-    -- 确认
-    confirmed_by_buyer   BOOLEAN DEFAULT false,
-    confirmed_by_supplier BOOLEAN DEFAULT false,
-    confirmed_at    TIMESTAMP,
-    
-    created_by      VARCHAR(32) REFERENCES users(id),
-    created_at      TIMESTAMP DEFAULT NOW(),
-    updated_at      TIMESTAMP DEFAULT NOW(),
-    notes           TEXT
-);
-
--- 对账差异记录
-CREATE TABLE srm_settlement_disputes (
-    id              VARCHAR(32) PRIMARY KEY,
-    settlement_id   VARCHAR(32) REFERENCES srm_settlements(id),
-    dispute_type    VARCHAR(50),                    -- price_diff/quantity_diff/quality_deduction/other
-    description     TEXT,
-    amount_diff     DECIMAL(12,2),
-    status          VARCHAR(20) DEFAULT 'open',     -- open/resolved
-    resolution      TEXT,
-    created_at      TIMESTAMP DEFAULT NOW()
-);
-```
-
-**对账流程：**
-```
-月末/按需 → 系统自动生成对账单（拉取该供应商本期所有已收货PO）
-    ↓
-三单匹配：PO金额 vs 入库数量×单价 vs 品质扣款
-    ↓
-差异标记（如有）→ 在线沟通解决
-    ↓
-双方确认 → 供应商开票 → 结算清单推送ERP
-    ↓
-ERP生成应付凭证 → 排款支付
-```
-
-### 3.8 M7: 看板与报表
-
-#### 3.7.1 打样进度看板（核心页面）
-
-按项目和阶段展示打样进度：
-
-```
-项目: Meteor (EVT阶段)
-━━━━━━━━━━━━━━━━━━━━━━━
-总零件: 50 | 已下单: 45 | 已到样: 30 | 已检验: 25 | 通过: 23
-[██████████████░░░░░░░░] 46%
-
-待处理:
-🔴 零件A（光学棱镜）— 供应商未回复，已超期3天
-🟡 零件B（外壳）— 模具开模中，预计2周后到样
-🟢 零件C~Z — 已到样待检验
-```
-
-#### 3.7.2 供应商绩效
-
-- 交期达成率
-- 来料合格率
-- 报价响应速度
-- 综合评分（自动计算）
-
----
-
-## 4. 前端页面设计
-
-### 4.1 页面列表
-
-```
-SRM系统
-├── 📊 首页/看板
-│   └── 打样进度总览 + 待办事项
-│
-├── 🏢 供应商管理
-│   ├── 供应商列表（搜索、筛选、分类）
-│   ├── 供应商详情（基本信息、联系人、可供物料、历史订单、评分）
-│   └── 供应商准入审批
-│
-├── 📋 采购需求
-│   ├── PR列表（按项目/状态筛选）
-│   ├── PR详情（行项列表、进度跟踪）
-│   └── 创建PR（手动/从BOM生成）
-│
-├── 💰 询价管理
-│   ├── RFQ列表
-│   ├── RFQ详情（发送记录、报价汇总）
-│   └── 比价分析页
-│
-├── 📦 采购订单
-│   ├── PO列表
-│   ├── PO详情（行项、物流、收货）
-│   └── 创建PO（从RFQ/PR生成）
-│
-├── 🔍 来料检验
-│   ├── 检验任务列表
-│   ├── 检验记录填写
-│   └── 检验报告
-│
-└── ⚙️ 设置
-    ├── 检验标准模板
-    └── 编码规则配置
-```
-
-### 4.2 核心交互流程
-
-**研发打样全流程（最常用）：**
-
-```
-Step 1: PLM BOM审批通过 → SRM自动收到采购需求
-Step 2: 采购员打开PR → 查看零件清单 → 选择供应商 → 创建询价单
-Step 3: 供应商报价 → 采购员比价 → 选定供应商 → 创建PO
-Step 4: 供应商发货 → 采购员收货 → 自动创建IQC任务
-Step 5: 品质工程师检验 → 填写结果 → 自动回写PLM
-Step 6: 项目经理在PLM看板查看：所有零件打样验证进度
-```
-
----
-
-## 5. API设计
-
-### 5.1 路由规划
-
-```
-/api/v1/srm/
-├── suppliers/                  # 供应商CRUD
-│   ├── GET    /               # 列表（支持搜索、分类、等级筛选）
-│   ├── POST   /               # 创建
-│   ├── GET    /:id            # 详情
-│   ├── PUT    /:id            # 更新
-│   ├── POST   /:id/approve    # 准入审批
-│   └── GET    /:id/contacts   # 联系人列表
-│
-├── purchase-requests/          # 采购需求
-│   ├── GET    /               # 列表
-│   ├── POST   /               # 手动创建
-│   ├── POST   /from-bom       # 从BOM生成
-│   ├── GET    /:id            # 详情（含行项）
-│   ├── PUT    /:id            # 更新
-│   └── POST   /:id/approve   # 审批
-│
-├── rfqs/                       # 询价
-│   ├── GET    /
-│   ├── POST   /
-│   ├── GET    /:id
-│   ├── POST   /:id/send       # 发送给供应商
-│   └── POST   /:id/quote      # 录入报价
-│
-├── purchase-orders/            # 采购订单
-│   ├── GET    /
-│   ├── POST   /
-│   ├── GET    /:id
-│   ├── PUT    /:id
-│   ├── POST   /:id/approve
-│   ├── POST   /:id/receive    # 收货
-│   └── POST   /:id/items/:itemId/receive  # 行项收货
-│
-├── inspections/                # 来料检验
-│   ├── GET    /
-│   ├── GET    /:id
-│   ├── PUT    /:id            # 填写检验结果
-│   └── POST   /:id/complete   # 完成检验
-│
-└── dashboard/                  # 看板
-    ├── GET    /sampling-progress  # 打样进度
-    └── GET    /supplier-performance  # 供应商绩效
-```
-
----
-
-## 6. 飞书集成
-
-### 6.1 通知场景
-
-| 事件 | 通知对象 | 通知内容 |
-|---|---|---|
-| PLM BOM审批通过 | 采购员 | "项目X的BOM已通过审批，请处理采购需求" |
-| PR审批通过 | 采购员 | "采购需求PR-001已审批通过，可以开始寻源" |
-| 到货签收 | IQC工程师 | "PO-001到货，请安排来料检验" |
-| 检验不通过 | 研发工程师+采购员 | "零件X检验不通过，请处理" |
-| 交期预警 | 采购员 | "零件X距离需求日期还有3天，供应商尚未发货" |
-| 打样全部完成 | 项目经理 | "项目X的EVT打样全部验收通过" |
-
-### 6.2 飞书审批集成
-
-供应商准入和大额PO审批可以对接飞书审批流，复用PLM已有的审批引擎。
-
----
-
-## 7. 编码规则
+## 9. 编码规则
 
 | 对象 | 编码格式 | 示例 |
 |---|---|---|
+| 采购项目 | SRMP-{年}-{4位流水} | SRMP-2026-0001 |
 | 供应商 | SUP-{4位流水} | SUP-0001 |
 | 采购需求 | PR-{年}-{4位流水} | PR-2026-0001 |
 | 询价单 | RFQ-{年}-{4位流水} | RFQ-2026-0001 |
 | 采购订单 | PO-{年}-{4位流水} | PO-2026-0001 |
 | 检验单 | IQC-{年}-{4位流水} | IQC-2026-0001 |
+| 8D改进单 | 8D-{年}-{4位流水} | 8D-2026-0001 |
+| 延期审批 | DLY-{年}-{4位流水} | DLY-2026-0001 |
 
 ---
 
-## 8. 分阶段实施计划
+## 10. 飞书集成
 
-### Phase 1: 供应商 + 打样采购（2周）
-**目标**：解决研发打样核心痛点
+| 事件 | 通知对象 | 通知内容 |
+|---|---|---|
+| BOM审批通过 | 采购员 | "项目X的BOM已通过审批，采购项目已创建" |
+| 交期预警(≤3天) | 采购员 | "零件X距交期还有3天，尚未下单" |
+| 交期超期 | 采购员+采购主管 | "零件X已超期N天" |
+| 延期审批 | 采购主管 | "采购员申请零件X延期，请审批" |
+| 延期通知 | 研发PM | "EVT打样采购延期5天，原因：外壳修模" |
+| 到货 | IQC工程师 | "PO-001到货，请安排来料检验" |
+| 检验不通过 | 采购员+研发 | "零件X检验不通过：尺寸超差" |
+| 打样全部通过 | 研发PM | "项目X的EVT打样全部验收通过" |
 
-- [x] 供应商档案管理（CRUD + 搜索）
-- [x] 采购需求管理（手动创建 + 从PLM BOM自动生成）
-- [x] 简化PO管理（创建 + 到货确认）
-- [x] PLM集成：BOM审批通过 → 自动创建PR
-- [x] 打样进度看板
+---
 
-### Phase 2: 询价比价 + 检验（2周）
-**目标**：完善采购流程闭环
+## 11. 分阶段实施计划
 
-- [ ] 询价单管理（RFQ）
-- [ ] 报价录入与比价分析
-- [ ] 来料检验（IQC）
-- [ ] 检验结果回写PLM
-- [ ] 飞书通知集成
+### Phase 1: 骨架 + 供应商 + 基础采购（已完成 ✓）
+- [x] 供应商档案CRUD
+- [x] 采购需求(PR)管理
+- [x] 简化PO管理
+- [x] PLM→SRM自动推送(BOM审批→创建PR)
+- [x] 供应商选择+PR生成PO
+- [x] 飞书通知
 
-### Phase 3: 质量闭环 + 对账（2周）
-**目标**：品质管控和财务协同
+### Phase 2: 采购项目化 + 交期管控 + 看板（下一步）
+- [ ] 采购项目(srm_projects)表和逻辑
+- [ ] PLM↔SRM桥接（特殊任务类型+进度同步）
+- [ ] 物料标准交期（分类默认+物料覆盖+供应商组合）
+- [ ] 交期自动计算和回写PLM
+- [ ] 延期审批流程
+- [ ] 操作日志表+自动记录
+- [ ] **看板视图（Kanban）**
+- [ ] 交期预警+飞书通知
 
-- [ ] 8D改进单管理（检验不通过自动触发）
-- [ ] 供应商限制逻辑（未回复8D→限制下单）
+### Phase 3: 多轮打样 + 质量闭环 + 甘特图
+- [ ] 多轮打样支持（round字段+文档关联链）
+- [ ] 检验不通过→自动8D
+- [ ] 重打/换供应商流程
+- [ ] **甘特图视图**
+- [ ] 供应商绩效自动评分
+
+### Phase 4: 询价比价 + 对账
+- [ ] 询价单(RFQ)管理
+- [ ] 报价录入+TCO比价模型
 - [ ] 自动对账（三单匹配）
-- [ ] 对账差异处理
-- [ ] 结算清单生成
+- [ ] 结算清单
 
-### Phase 4: 高级功能（2周）
-**目标**：提升管理效率
-
-- [ ] 供应商准入审批流程
-- [ ] 供应商绩效自动评分（质量/交期/价格加权）
-- [ ] 交期预警（自动检测即将超期的PO）
-- [ ] TCO总拥有成本比价模型
-- [ ] 报表导出
-
-### Phase 5: ERP衔接（后续）
-**目标**：量产切换
-
-- [ ] 结算清单推送ERP生成应付凭证
-- [ ] 供应商数据同步到ERP
-- [ ] 打样价格转量产合同价
-- [ ] 量产PO在ERP中管理
+### Phase 5: ERP衔接
+- [ ] 结算推送ERP
+- [ ] 量产PO管理
 - [ ] 库存联动
 
-### 未来可扩展（暂不实施）
-- 天眼查/企查查API风险监控（供应商规模扩大后）
-- 供应商自助门户（供应商自己报价、查看PO、回复8D）
-- JIT/VMI协同（量产后）
-- 供应链金融/动态贴现（体量达到后）
-- 条码/PDA联动（建立仓库后）
+### 未来可扩展
+- 天眼查API风险监控
+- 供应商自助门户
+- JIT/VMI协同
+- 供应链金融
 
 ---
 
-## 9. 代码组织
+## 12. 关键决策记录
 
-```
-internal/
-├── plm/          # 现有PLM模块
-├── erp/          # 现有ERP模块（待建）
-└── srm/          # 新增SRM模块
-    ├── entity/
-    │   ├── supplier.go          # 供应商实体
-    │   ├── purchase_request.go  # 采购需求实体
-    │   ├── rfq.go               # 询价实体
-    │   ├── purchase_order.go    # 采购订单实体
-    │   └── inspection.go        # 检验实体
-    ├── repository/
-    │   ├── supplier_repo.go
-    │   ├── pr_repo.go
-    │   ├── po_repo.go
-    │   └── inspection_repo.go
-    ├── service/
-    │   ├── supplier_service.go
-    │   ├── procurement_service.go
-    │   ├── inspection_service.go
-    │   └── dashboard_service.go
-    └── handler/
-        ├── supplier_handler.go
-        ├── pr_handler.go
-        ├── po_handler.go
-        ├── inspection_handler.go
-        └── dashboard_handler.go
-
-cmd/
-├── plm/main.go   # 现有，加载SRM模块
-└── srm/main.go   # 可选：独立SRM入口（初期不需要）
-
-web/
-├── plm/          # PLM前端
-└── srm/          # SRM前端
-
-nimo-srm-web/     # SRM前端源码
-```
+| 决策 | 选择 | 原因 |
+|---|---|---|
+| 流程管理方式 | 文档驱动（非任务驱动） | 符合采购场景认知，Coupa/Ariba最佳实践 |
+| PLM↔SRM集成 | 桥接任务+进度同步 | 职责清晰，信息适度，华为IPD+ISC模式 |
+| 交期管理 | 刚性管控（物料属性定交期） | 防止采购随意延期，管理有抓手 |
+| 初始工期 | 从SRM计算，不预估 | 数据驱动，不拍脑袋 |
+| 多BOM触发 | 各自独立触发 | 尽早启动采购，不等齐套 |
+| 数据展现 | 看板+甘特图+表格多视图 | 不同角色不同需求 |
+| 技术架构 | 单体Go服务 | 20人团队，100零件，够用 |
+| 打样vs量产采购 | 同一套流程，type区分 | 行业主流做法（SAP Ariba） |
 
 ---
 
-## 10. 风险与注意事项
-
-1. **物料主数据一致性**：SRM和PLM共用 `materials` 表，SRM不创建物料，只引用PLM的物料编码
-2. **权限隔离**：采购员只能看SRM，研发只能看PLM（除非同时有两个角色）
-3. **并发问题**：BOM审批通过自动创建PR时，需防止重复创建（幂等性）
-4. **数据迁移**：现有供应商信息需要从Excel/飞书文档导入
-5. **供应商自助**：Phase 1不做供应商门户，报价由采购员手动录入；后续可考虑开放供应商自助报价
-
----
-
-> 本文档为初版设计，具体实现时可能根据实际情况调整。
+> 本PRD基于2026-02-09泽斌与Lyra的深度讨论，确立了SRM系统的核心架构和设计原则。
