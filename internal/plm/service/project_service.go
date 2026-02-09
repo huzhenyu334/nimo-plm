@@ -784,10 +784,7 @@ func (s *ProjectService) CompleteMyTask(ctx context.Context, taskID, userID stri
 				return fmt.Errorf("保存表单提交失败: %w", err)
 			}
 
-			// 4.5 检查表单中是否有 bom_upload 类型字段，自动创建项目BOM
-			if s.bomSvc != nil {
-				s.processBOMUploadFields(ctx, form, formData, task.ProjectID, userID)
-			}
+			// 注意：bom_upload 字段的BOM创建在审批通过后执行，不在提交时
 		}
 	}
 
@@ -834,9 +831,10 @@ func (s *ProjectService) CompleteMyTask(ctx context.Context, taskID, userID stri
 	return nil
 }
 
-// processBOMUploadFields 检查表单字段定义，找出 bom_upload 类型的字段，
+// ProcessBOMUploadFields 检查表单字段定义，找出 bom_upload 类型的字段，
 // 然后从 formData 中提取已解析的BOM数据，自动创建项目BOM。
-func (s *ProjectService) processBOMUploadFields(ctx context.Context, form *entity.TaskForm, formData map[string]interface{}, projectID, userID string) {
+// 由审批通过时调用。
+func (s *ProjectService) ProcessBOMUploadFields(ctx context.Context, form *entity.TaskForm, formData map[string]interface{}, projectID, userID string) {
 	// 解析 form.Fields 找出 type=bom_upload 的字段key
 	var fields []struct {
 		Key  string `json:"key"`
