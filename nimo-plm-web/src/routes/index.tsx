@@ -2,6 +2,11 @@ import React from 'react';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import MainLayout from '@/layouts/MainLayout';
 import { Login, Dashboard, Templates, TemplateDetail, Projects, ProjectDetail, Materials, Approvals, ApprovalAdmin, ApprovalEditor, MyTasks, RoleManagement } from '@/pages';
+import SRMDashboard from '@/pages/srm/SRMDashboard';
+import Suppliers from '@/pages/srm/Suppliers';
+import PurchaseRequests from '@/pages/srm/PurchaseRequests';
+import PurchaseOrders from '@/pages/srm/PurchaseOrders';
+import Inspections from '@/pages/srm/Inspections';
 import { useAuth } from '@/contexts/AuthContext';
 
 // 受保护路由组件
@@ -79,6 +84,26 @@ export const router = createBrowserRouter([
       {
         path: 'roles',
         element: <RoleManagement />,
+      },
+      {
+        path: 'srm',
+        element: <SRMDashboard />,
+      },
+      {
+        path: 'srm/suppliers',
+        element: <Suppliers />,
+      },
+      {
+        path: 'srm/purchase-requests',
+        element: <PurchaseRequests />,
+      },
+      {
+        path: 'srm/purchase-orders',
+        element: <PurchaseOrders />,
+      },
+      {
+        path: 'srm/inspections',
+        element: <Inspections />,
       },
     ],
   },

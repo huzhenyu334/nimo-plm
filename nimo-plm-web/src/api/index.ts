@@ -13,3 +13,4 @@ export * from './codenames';
 export * from './approval';
 export * from './users';
 export * from './approvalDefinitions';
+export * from './srm';
