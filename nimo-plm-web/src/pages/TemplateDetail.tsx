@@ -38,6 +38,7 @@ import {
   RollbackOutlined,
   HistoryOutlined,
   FormOutlined,
+  LockOutlined,
 } from '@ant-design/icons';
 import { templateApi, TemplateTask, TemplateVersion } from '@/api/templates';
 import { codenameApi, Codename } from '@/api/codenames';
@@ -525,7 +526,14 @@ const TemplateDetail: React.FC = () => {
   const deleteTask = useCallback(
     (key: string) => {
       if (isReadOnly) return;
-      setTasks((prev) => prev.filter((t) => t._key !== key));
+      setTasks((prev) => {
+        const taskToDelete = prev.find(t => t._key === key);
+        if (!taskToDelete) return prev.filter((t) => t._key !== key);
+
+        // Also remove any SRM procurement task linked to this task
+        const srmTaskCode = `SRM-${taskToDelete.task_code}`;
+        return prev.filter((t) => t._key !== key && !(t.task_type === 'srm_procurement' && t.task_code === srmTaskCode));
+      });
       markChanged();
     },
     [markChanged, isReadOnly]
@@ -720,6 +728,7 @@ const TemplateDetail: React.FC = () => {
       sort_order: idx,
       description: (t as any).description || '',
       depends_on: (t as any)._depends_on || [],
+      is_locked: t.is_locked || false,
     }));
   };
 
@@ -1015,6 +1024,54 @@ const TemplateDetail: React.FC = () => {
         name: '完成表单',
         fields: formFields,
       });
+
+      // Check for bom_upload field changes → auto-create/remove SRM procurement task
+      const oldFields = templateForms[formConfigTask.task_code] || [];
+      const hadBomUpload = oldFields.some(f => f.type === 'bom_upload');
+      const hasBomUpload = formFields.some(f => f.type === 'bom_upload');
+
+      if (!hadBomUpload && hasBomUpload) {
+        // bom_upload added → create SRM procurement task
+        const srmTaskCode = `SRM-${formConfigTask.task_code}`;
+        const existingSrmTask = tasks.find(t => t.task_type === 'srm_procurement' && t.task_code === srmTaskCode);
+
+        if (!existingSrmTask) {
+          const phaseTasks = tasks.filter(t => t.phase === formConfigTask.phase);
+          const maxOrder = phaseTasks.length > 0 ? Math.max(...phaseTasks.map(t => t.sort_order)) : 0;
+
+          const newKey = `srm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const newTask: TaskRow = {
+            _key: newKey,
+            task_code: srmTaskCode,
+            name: '打样采购',
+            phase: formConfigTask.phase,
+            task_type: 'srm_procurement',
+            parent_task_code: '',
+            default_assignee_role: '采购',
+            estimated_days: 7,
+            is_critical: false,
+            requires_approval: false,
+            auto_create_feishu_task: false,
+            feishu_approval_code: '',
+            sort_order: maxOrder + 1,
+            is_locked: true,
+            _depends_on: [formConfigTask.task_code],
+          };
+          setTasks(prev => [...prev, newTask]);
+          markChanged();
+          msg.info('已自动创建「打样采购」任务，依赖于当前BOM任务');
+        }
+      } else if (hadBomUpload && !hasBomUpload) {
+        // bom_upload removed → remove associated SRM procurement task
+        const srmTaskCode = `SRM-${formConfigTask.task_code}`;
+        const srmTask = tasks.find(t => t.task_type === 'srm_procurement' && t.task_code === srmTaskCode);
+        if (srmTask) {
+          setTasks(prev => prev.filter(t => t.task_code !== srmTaskCode));
+          markChanged();
+          msg.info('已自动移除关联的「打样采购」任务');
+        }
+      }
+
       setTemplateForms(prev => ({ ...prev, [formConfigTask.task_code]: formFields }));
       msg.success('表单配置已保存');
       setFormConfigModalOpen(false);
@@ -1300,10 +1357,12 @@ const TemplateDetail: React.FC = () => {
 
                   {phaseTasks.map((task) => {
                     const isMilestone = task.task_type === 'MILESTONE';
+                    const isSrmTask = task.task_type === 'srm_procurement';
+                    const isTaskLocked = !!task.is_locked;
                     const isSubtask = !!task.parent_task_code;
                     const depth = (task as any)._depth || 0;
                     const canHaveChildren =
-                      task.task_type === 'MILESTONE' || task.task_type === 'TASK';
+                      !isSrmTask && (task.task_type === 'MILESTONE' || task.task_type === 'TASK');
 
                     // Task type options: subtasks cannot become MILESTONE
                     const typeOptions = isSubtask
@@ -1324,6 +1383,8 @@ const TemplateDetail: React.FC = () => {
                           borderBottom: '1px solid #f0f0f0',
                           background: isReadOnly
                             ? '#f9f9f9'
+                            : isSrmTask
+                            ? '#f0f5ff'
                             : depth > 0
                             ? '#fcfcfc'
                             : isMilestone
@@ -1371,30 +1432,38 @@ const TemplateDetail: React.FC = () => {
                             onChange={(val) => updateTask(task._key, 'task_code', val)}
                             placeholder="编码"
                             style={{ fontFamily: 'monospace', fontSize: 12, display: 'inline-block' }}
-                            readOnly={isReadOnly}
+                            readOnly={isReadOnly || isTaskLocked}
                           />
                         </div>
 
                         {/* Task Name */}
-                        <div className="editable-name-trigger" style={{ flex: 1, minWidth: 150 }}>
+                        <div className="editable-name-trigger" style={{ flex: 1, minWidth: 150, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          {isSrmTask && (
+                            <>
+                              <Tag color="blue" style={{ margin: 0, fontSize: 11, lineHeight: '18px', flexShrink: 0 }}>采购任务</Tag>
+                              <Tooltip title="此任务由系统自动管理，不可编辑">
+                                <LockOutlined style={{ color: '#999', fontSize: 12, flexShrink: 0 }} />
+                              </Tooltip>
+                            </>
+                          )}
                           <EditableText
                             value={task.name}
                             onChange={(val) => updateTask(task._key, 'name', val)}
                             placeholder="输入任务名称"
                             style={isMilestone ? { fontWeight: 600 } : undefined}
-                            readOnly={isReadOnly}
+                            readOnly={isReadOnly || isTaskLocked}
                           />
                         </div>
 
                         {/* Task Type */}
                         <div style={{ width: 100, flexShrink: 0 }}>
                           <EditableSelect
-                            value={task.task_type}
+                            value={isSrmTask ? '采购' : task.task_type}
                             onChange={(val) =>
                               updateTask(task._key, 'task_type', val as TaskRow['task_type'])
                             }
                             options={typeOptions}
-                            readOnly={isReadOnly || isSubtask}
+                            readOnly={isReadOnly || isSubtask || isTaskLocked}
                           />
                         </div>
 
@@ -1409,13 +1478,13 @@ const TemplateDetail: React.FC = () => {
                             ]}
                             placeholder="无"
                             allowClear
-                            readOnly={isReadOnly}
+                            readOnly={isReadOnly || isTaskLocked}
                           />
                         </div>
 
                         {/* 前置任务 (Dependencies) */}
                         <div style={{ width: 150, flexShrink: 0 }}>
-                          {isReadOnly ? (
+                          {(isReadOnly || isTaskLocked) ? (
                             <div style={{ padding: '1px 7px', minHeight: 24, lineHeight: '24px', fontSize: 12 }}>
                               {((task as any)._depends_on && (task as any)._depends_on.length > 0)
                                 ? (task as any)._depends_on.join(', ')
@@ -1445,7 +1514,7 @@ const TemplateDetail: React.FC = () => {
                             options={roleOptions}
                             placeholder="选择角色"
                             allowClear
-                            readOnly={isReadOnly}
+                            readOnly={isReadOnly || isTaskLocked}
                           />
                         </div>
 
@@ -1455,7 +1524,7 @@ const TemplateDetail: React.FC = () => {
                             value={task.estimated_days}
                             onChange={(val) => updateTask(task._key, 'estimated_days', val)}
                             min={1}
-                            readOnly={isReadOnly}
+                            readOnly={isReadOnly || isTaskLocked}
                           />
                         </div>
 
@@ -1464,7 +1533,7 @@ const TemplateDetail: React.FC = () => {
                           <Switch
                             size="small"
                             checked={task.is_critical}
-                            disabled={isReadOnly}
+                            disabled={isReadOnly || isTaskLocked}
                             onChange={(val) => updateTask(task._key, 'is_critical', val)}
                           />
                         </div>
@@ -1474,7 +1543,7 @@ const TemplateDetail: React.FC = () => {
                           <Switch
                             size="small"
                             checked={task.requires_approval}
-                            disabled={isReadOnly}
+                            disabled={isReadOnly || isTaskLocked}
                             onChange={(val) => updateTask(task._key, 'requires_approval', val)}
                           />
                           {task.requires_approval && (
@@ -1485,7 +1554,7 @@ const TemplateDetail: React.FC = () => {
                               onChange={(val) => updateTask(task._key, 'feishu_approval_code', val)}
                               placeholder="选择审批模板"
                               allowClear
-                              disabled={isReadOnly}
+                              disabled={isReadOnly || isTaskLocked}
                               options={publishedApprovalDefs.map(d => ({
                                 value: d.id,
                                 label: `${d.name}`
@@ -1496,6 +1565,13 @@ const TemplateDetail: React.FC = () => {
 
                         {/* Actions */}
                         {!isReadOnly ? (
+                          isTaskLocked ? (
+                            <div style={{ width: 90, flexShrink: 0, textAlign: 'center' }}>
+                              <Tooltip title="此任务由系统自动管理">
+                                <LockOutlined style={{ color: '#999' }} />
+                              </Tooltip>
+                            </div>
+                          ) : (
                           <div style={{ width: 90, flexShrink: 0, textAlign: 'center' }}>
                             <Space size={0}>
                               <Tooltip title={templateForms[task.task_code]?.length ? `表单(${templateForms[task.task_code].length}字段)` : '配置表单'}>
@@ -1533,6 +1609,7 @@ const TemplateDetail: React.FC = () => {
                               </Popconfirm>
                             </Space>
                           </div>
+                          )
                         ) : (
                           templateForms[task.task_code]?.length ? (
                             <div style={{ width: 90, flexShrink: 0, textAlign: 'center' }}>

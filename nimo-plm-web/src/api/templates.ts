@@ -43,10 +43,11 @@ export interface TemplateTask {
   description?: string;
   phase: string;
   parent_task_code?: string;
-  task_type: 'MILESTONE' | 'TASK' | 'SUBTASK';
+  task_type: 'MILESTONE' | 'TASK' | 'SUBTASK' | 'srm_procurement';
   default_assignee_role?: string;
   estimated_days: number;
   is_critical: boolean;
+  is_locked?: boolean;
   requires_approval: boolean;
   approval_type?: string;
   auto_create_feishu_task: boolean;
