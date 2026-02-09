@@ -172,6 +172,47 @@ export interface SamplingProgress {
   progress_pct: number;
 }
 
+export interface SRMProject {
+  id: string;
+  code: string;
+  name: string;
+  type: string;
+  phase: string;
+  status: string;
+  plm_project_id?: string;
+  plm_task_id?: string;
+  plm_bom_id?: string;
+  total_items: number;
+  sourcing_count: number;
+  ordered_count: number;
+  received_count: number;
+  passed_count: number;
+  failed_count: number;
+  estimated_days?: number;
+  start_date?: string;
+  target_date?: string;
+  actual_date?: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActivityLog {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  entity_code: string;
+  action: string;
+  from_status: string;
+  to_status: string;
+  content: string;
+  attachments?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  operator_id: string;
+  operator_name: string;
+  created_at: string;
+}
+
 // ============ API ============
 
 export const srmApi = {
@@ -370,6 +411,47 @@ export const srmApi = {
     const response = await apiClient.get<ApiResponse<SamplingProgress>>('/srm/dashboard/sampling-progress', {
       params: { project_id: projectId },
     });
+    return response.data.data;
+  },
+
+  // --- SRM Projects ---
+  listProjects: async (params?: {
+    status?: string;
+    type?: string;
+    phase?: string;
+    plm_project_id?: string;
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<PaginatedResponse<SRMProject>> => {
+    const response = await apiClient.get<ApiResponse<PaginatedResponse<SRMProject>>>('/srm/projects', { params });
+    return response.data.data;
+  },
+
+  getProject: async (id: string): Promise<SRMProject> => {
+    const response = await apiClient.get<ApiResponse<SRMProject>>(`/srm/projects/${id}`);
+    return response.data.data;
+  },
+
+  getProjectProgress: async (id: string): Promise<SRMProject> => {
+    const response = await apiClient.get<ApiResponse<SRMProject>>(`/srm/projects/${id}/progress`);
+    return response.data.data;
+  },
+
+  // --- Activity Logs ---
+  listProjectActivities: async (projectId: string, params?: {
+    page?: number;
+    page_size?: number;
+  }): Promise<PaginatedResponse<ActivityLog>> => {
+    const response = await apiClient.get<ApiResponse<PaginatedResponse<ActivityLog>>>(`/srm/projects/${projectId}/activities`, { params });
+    return response.data.data;
+  },
+
+  listActivities: async (entityType: string, entityId: string, params?: {
+    page?: number;
+    page_size?: number;
+  }): Promise<PaginatedResponse<ActivityLog>> => {
+    const response = await apiClient.get<ApiResponse<PaginatedResponse<ActivityLog>>>(`/srm/activities/${entityType}/${entityId}`, { params });
     return response.data.data;
   },
 };

@@ -7,6 +7,8 @@ import Suppliers from '@/pages/srm/Suppliers';
 import PurchaseRequests from '@/pages/srm/PurchaseRequests';
 import PurchaseOrders from '@/pages/srm/PurchaseOrders';
 import Inspections from '@/pages/srm/Inspections';
+import SRMProjects from '@/pages/srm/Projects';
+import KanbanBoard from '@/pages/srm/KanbanBoard';
 import { useAuth } from '@/contexts/AuthContext';
 
 // 受保护路由组件
@@ -104,6 +106,14 @@ export const router = createBrowserRouter([
       {
         path: 'srm/inspections',
         element: <Inspections />,
+      },
+      {
+        path: 'srm/projects',
+        element: <SRMProjects />,
+      },
+      {
+        path: 'srm/kanban',
+        element: <KanbanBoard />,
       },
     ],
   },

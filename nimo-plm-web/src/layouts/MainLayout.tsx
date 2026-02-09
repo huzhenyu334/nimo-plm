@@ -17,6 +17,7 @@ import {
   FileTextOutlined,
   ShoppingCartOutlined,
   SafetyCertificateOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import { Dropdown, Avatar, Space, Spin } from 'antd';
 import { useAuth } from '@/contexts/AuthContext';
@@ -105,11 +106,13 @@ const MainLayout: React.FC = () => {
         name: 'SRM 采购管理',
         icon: <ShoppingCartOutlined />,
         children: [
-          { path: '/srm', name: '采购看板', icon: <DashboardOutlined /> },
+          { path: '/srm/kanban', name: '采购看板', icon: <AppstoreOutlined /> },
+          { path: '/srm/projects', name: '采购项目', icon: <ProjectOutlined /> },
           { path: '/srm/suppliers', name: '供应商', icon: <ShopOutlined /> },
           { path: '/srm/purchase-requests', name: '采购需求', icon: <FileTextOutlined /> },
           { path: '/srm/purchase-orders', name: '采购订单', icon: <ShoppingCartOutlined /> },
           { path: '/srm/inspections', name: '来料检验', icon: <SafetyCertificateOutlined /> },
+          { path: '/srm', name: '采购总览', icon: <DashboardOutlined /> },
         ],
       },
     ];
