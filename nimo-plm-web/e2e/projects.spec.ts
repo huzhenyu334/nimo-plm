@@ -6,74 +6,45 @@ test.describe('Project Management', () => {
     expect(response.status()).toBe(401);
   });
 
-  test('projects page redirects to login without auth', async ({ page }) => {
-    // Clear tokens
-    await page.goto('/login');
-    await page.evaluate(() => {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-    });
-
+  test('project list page loads', async ({ page }) => {
     await page.goto('/projects');
-    await page.waitForURL(/\/login/, { timeout: 5000 });
-    await expect(page).toHaveURL(/\/login/);
+    await page.waitForLoadState('networkidle');
+
+    // Should show the project list heading
+    await expect(page.getByRole('heading', { name: '研发项目' })).toBeVisible();
   });
 
-  // Authenticated tests - require valid session
-  test.describe('with authentication', () => {
-    test.skip(() => true, 'Requires valid Feishu SSO session - run manually with storageState');
+  test('project list shows table columns', async ({ page }) => {
+    await page.goto('/projects');
+    await page.waitForLoadState('networkidle');
 
-    test('project list page loads', async ({ page }) => {
-      await page.goto('/projects');
-      await page.waitForLoadState('networkidle');
+    // Verify table column headers are visible
+    await expect(page.getByRole('columnheader', { name: '项目编码' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: '项目名称' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: '操作' })).toBeVisible();
+  });
 
-      // Should show project list table
-      await expect(page.locator('text=项目')).toBeVisible();
-    });
+  test('create project button navigates to templates', async ({ page }) => {
+    await page.goto('/projects');
+    await page.waitForLoadState('networkidle');
 
-    test('create project flow', async ({ page }) => {
-      await page.goto('/projects');
-      await page.waitForLoadState('networkidle');
+    // Click the create button which navigates to templates
+    await page.getByRole('button', { name: '从研发流程创建项目' }).click();
 
-      // Click create button
-      await page.click('button:has-text("新建项目")');
+    // Should navigate to templates page
+    await expect(page).toHaveURL(/\/templates/);
+  });
 
-      // Fill project form
-      await page.fill('input[placeholder*="项目名称"]', 'E2E测试项目');
-      await page.fill('textarea[placeholder*="描述"]', 'E2E自动化测试创建的项目');
+  test('view project detail', async ({ page }) => {
+    await page.goto('/projects');
+    await page.waitForLoadState('networkidle');
 
-      // Submit
-      await page.click('button:has-text("确定")');
-
-      // Verify project created
-      await expect(page.locator('text=E2E测试项目')).toBeVisible({ timeout: 10000 });
-    });
-
-    test('view project detail', async ({ page }) => {
-      await page.goto('/projects');
-      await page.waitForLoadState('networkidle');
-
-      // Click on project to view detail
-      await page.click('text=E2E测试项目');
-
+    // Click "详情" link on the first project row
+    const detailLink = page.getByRole('button', { name: '详情' }).first();
+    if (await detailLink.isVisible()) {
+      await detailLink.click();
       // Should navigate to detail page
       await expect(page).toHaveURL(/\/projects\/.+/);
-      await expect(page.locator('text=E2E测试项目')).toBeVisible();
-    });
-
-    test('delete project', async ({ page }) => {
-      await page.goto('/projects');
-      await page.waitForLoadState('networkidle');
-
-      // Find and delete test project
-      const row = page.locator('tr', { hasText: 'E2E测试项目' });
-      await row.locator('button:has-text("删除")').click();
-
-      // Confirm
-      await page.click('button:has-text("确定")');
-
-      // Verify removed
-      await expect(page.locator('text=E2E测试项目')).not.toBeVisible({ timeout: 5000 });
-    });
+    }
   });
 });

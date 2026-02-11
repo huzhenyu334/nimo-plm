@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
 
+// Auth tests need to test unauthenticated scenarios, so clear storageState
+test.use({ storageState: { cookies: [], origins: [] } });
+
 test.describe('Authentication', () => {
   test('login page loads', async ({ page }) => {
     await page.goto('/login');
@@ -11,13 +14,6 @@ test.describe('Authentication', () => {
   });
 
   test('unauthenticated user redirects to login', async ({ page }) => {
-    // Clear any stored tokens
-    await page.goto('/login');
-    await page.evaluate(() => {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-    });
-
     // Navigate to a protected page
     await page.goto('/dashboard');
 

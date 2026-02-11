@@ -1,98 +1,86 @@
 import { test, expect } from '@playwright/test';
 
-// Helper: set auth tokens in localStorage to simulate logged-in state
-async function loginWithToken(page: import('@playwright/test').Page) {
-  await page.goto('/login');
-  await page.evaluate(() => {
-    // Set a fake token to bypass frontend auth check
-    // Note: API calls will still fail without a real token
-    localStorage.setItem('access_token', 'test-token-for-e2e');
-    localStorage.setItem('refresh_token', 'test-refresh-token');
-  });
-}
+// Use a unique role name to avoid conflicts across test runs
+const TEST_ROLE_NAME = 'E2E测试角色-' + Date.now().toString(36);
+const TEST_ROLE_RENAMED = TEST_ROLE_NAME + '-已修改';
 
 test.describe('Role Management', () => {
-  test('roles API returns list', async ({ request }) => {
-    // Direct API test - will fail with 401 without auth
+  // CRUD tests must run in order: create → edit → delete
+  test.describe.configure({ mode: 'serial' });
+  test('roles API returns 401 without auth header', async ({ request }) => {
     const response = await request.get('/api/v1/roles', {
       headers: { 'Authorization': 'Bearer invalid-token' },
     });
-    // Without valid token, should get 401
     expect(response.status()).toBe(401);
   });
 
-  test('roles page exists in frontend', async ({ page }) => {
-    await page.goto('/login');
-    // Verify the login page loads (prerequisite for navigation)
-    await expect(page).toHaveURL(/\/login/);
+  test('roles list page loads', async ({ page }) => {
+    await page.goto('/roles');
+    await page.waitForLoadState('networkidle');
+
+    // Should show role management page with role list
+    await expect(page.getByText('角色管理').first()).toBeVisible();
   });
 
-  // The following tests require authentication - they validate the UI structure
-  // when auth is available. Skip when running without a valid session.
+  test('create role flow', async ({ page }) => {
+    await page.goto('/roles');
+    await page.waitForLoadState('networkidle');
 
-  test.describe('with authentication', () => {
-    test.skip(() => true, 'Requires valid Feishu SSO session - run manually with storageState');
+    // Click "新增角色" button at the bottom of the role list
+    await page.getByRole('button', { name: '新增角色' }).click();
 
-    test('roles list page loads', async ({ page }) => {
-      await page.goto('/roles');
-      await page.waitForLoadState('networkidle');
+    // Fill in role name in the modal
+    await page.getByPlaceholder('如 项目经理').fill(TEST_ROLE_NAME);
 
-      // Should show role management page
-      await expect(page.locator('text=角色')).toBeVisible();
-    });
+    // Submit
+    await page.getByRole('button', { name: '确 定' }).click();
 
-    test('create role flow', async ({ page }) => {
-      await page.goto('/roles');
-      await page.waitForLoadState('networkidle');
+    // Wait for modal to close and verify role appears
+    await expect(page.getByText(TEST_ROLE_NAME).first()).toBeVisible({ timeout: 5000 });
+  });
 
-      // Click add role button
-      await page.click('button:has-text("新增")');
+  test('edit role flow', async ({ page }) => {
+    await page.goto('/roles');
+    await page.waitForLoadState('networkidle');
 
-      // Fill in role form
-      await page.fill('input[placeholder*="角色名称"]', 'E2E测试角色');
+    // Click on the role in the list to select it
+    await page.getByText(TEST_ROLE_NAME).first().click();
 
-      // Submit
-      await page.click('button:has-text("确定")');
+    // Click the MoreOutlined (⋮) icon on the role item to open dropdown
+    const roleItem = page.locator('div[style*="cursor: pointer"]', { hasText: TEST_ROLE_NAME }).first();
+    await roleItem.locator('.ant-dropdown-trigger').click();
 
-      // Verify role appears in list
-      await expect(page.locator('text=E2E测试角色')).toBeVisible({ timeout: 5000 });
-    });
+    // Click edit option in the dropdown menu
+    await page.locator('.ant-dropdown-menu-item').getByText('编辑').click();
 
-    test('edit role flow', async ({ page }) => {
-      await page.goto('/roles');
-      await page.waitForLoadState('networkidle');
+    // Update name
+    await page.getByPlaceholder('如 项目经理').fill(TEST_ROLE_RENAMED);
 
-      // Click on a role to select it
-      await page.click('text=E2E测试角色');
+    // Submit
+    await page.getByRole('button', { name: '确 定' }).click();
 
-      // Click edit button
-      await page.click('button:has-text("编辑")');
+    // Verify updated name
+    await expect(page.getByText(TEST_ROLE_RENAMED).first()).toBeVisible({ timeout: 5000 });
+  });
 
-      // Update name
-      await page.fill('input[placeholder*="角色名称"]', 'E2E测试角色-已修改');
+  test('delete role flow', async ({ page }) => {
+    await page.goto('/roles');
+    await page.waitForLoadState('networkidle');
 
-      // Submit
-      await page.click('button:has-text("确定")');
+    // Click the MoreOutlined icon on the role item to open dropdown
+    const roleItem = page.locator('div[style*="cursor: pointer"]', { hasText: TEST_ROLE_RENAMED }).first();
+    await roleItem.locator('.ant-dropdown-trigger').click();
 
-      // Verify updated name
-      await expect(page.locator('text=E2E测试角色-已修改')).toBeVisible({ timeout: 5000 });
-    });
+    // Click delete option in the dropdown
+    await page.locator('.ant-dropdown-menu-item').getByText('删除').click();
 
-    test('delete role flow', async ({ page }) => {
-      await page.goto('/roles');
-      await page.waitForLoadState('networkidle');
+    // Wait for the confirm modal to appear, then click confirm
+    const confirmModal = page.locator('.ant-modal-confirm');
+    await expect(confirmModal).toBeVisible();
+    await confirmModal.getByRole('button', { name: '确 定' }).click();
 
-      // Click on test role
-      await page.click('text=E2E测试角色-已修改');
-
-      // Click delete button
-      await page.click('button:has-text("删除")');
-
-      // Confirm deletion
-      await page.click('button:has-text("确定")');
-
-      // Verify role is removed
-      await expect(page.locator('text=E2E测试角色-已修改')).not.toBeVisible({ timeout: 5000 });
-    });
+    // Wait for modal to close and verify role is removed
+    await expect(confirmModal).not.toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(TEST_ROLE_RENAMED, { exact: true })).not.toBeVisible({ timeout: 5000 });
   });
 });
