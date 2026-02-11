@@ -17,7 +17,6 @@ import {
   FileTextOutlined,
   ShoppingCartOutlined,
   SafetyCertificateOutlined,
-  AppstoreOutlined,
   AccountBookOutlined,
   ToolOutlined,
   StarOutlined,
@@ -109,8 +108,7 @@ const MainLayout: React.FC = () => {
         name: 'SRM 采购管理',
         icon: <ShoppingCartOutlined />,
         children: [
-          { path: '/srm/kanban', name: '采购看板', icon: <AppstoreOutlined /> },
-          { path: '/srm/projects', name: '采购项目', icon: <ProjectOutlined /> },
+          { path: '/srm', name: '采购总览', icon: <DashboardOutlined /> },
           { path: '/srm/suppliers', name: '供应商', icon: <ShopOutlined /> },
           { path: '/srm/purchase-requests', name: '采购需求', icon: <FileTextOutlined /> },
           { path: '/srm/purchase-orders', name: '采购订单', icon: <ShoppingCartOutlined /> },
@@ -119,7 +117,6 @@ const MainLayout: React.FC = () => {
           { path: '/srm/corrective-actions', name: '8D改进', icon: <ToolOutlined /> },
           { path: '/srm/evaluations', name: '供应商评价', icon: <StarOutlined /> },
           { path: '/srm/equipment', name: '通用设备', icon: <ToolOutlined /> },
-          { path: '/srm', name: '采购总览', icon: <DashboardOutlined /> },
         ],
       },
     ];
