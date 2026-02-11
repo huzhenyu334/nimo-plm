@@ -72,3 +72,10 @@ export const departmentApi = {
     return res.data.data?.items || [];
   },
 };
+
+export const userApi = {
+  list: async (): Promise<DepartmentUser[]> => {
+    const res = await apiClient.get('/users');
+    return res.data.data?.items || [];
+  },
+};

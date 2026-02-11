@@ -29,6 +29,7 @@ import {
 import {
   roleApi,
   departmentApi,
+  userApi,
   Role,
   RoleMember,
   DepartmentTreeNode,
@@ -255,20 +256,19 @@ const RoleManagement: React.FC = () => {
                   trigger={['click']}
                   menu={{
                     items: [
-                      { key: 'edit', label: '编辑', onClick: () => openEditRole(role) },
-                      {
-                        key: 'delete',
-                        label: '删除',
-                        danger: true,
-                        onClick: () => {
-                          Modal.confirm({
-                            title: '确认删除',
-                            content: `确定要删除角色「${role.name}」吗？`,
-                            onOk: () => deleteRoleMut.mutate(role.id),
-                          });
-                        },
-                      },
+                      { key: 'edit', label: '编辑' },
+                      { key: 'delete', label: '删除', danger: true },
                     ],
+                    onClick: ({ key }) => {
+                      if (key === 'edit') openEditRole(role);
+                      if (key === 'delete') {
+                        Modal.confirm({
+                          title: '确认删除',
+                          content: `确定要删除角色「${role.name}」吗？`,
+                          onOk: () => deleteRoleMut.mutate(role.id),
+                        });
+                      }
+                    },
                   }}
                 >
                   <MoreOutlined
@@ -432,11 +432,19 @@ const AddMemberModal: React.FC<AddMemberModalProps> = ({
   const [selectedUsers, setSelectedUsers] = useState<Map<string, DepartmentUser>>(new Map());
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
 
-  const { data: deptTree = [], isLoading } = useQuery({
+  const { data: deptTree = [], isLoading: deptLoading } = useQuery({
     queryKey: ['department-tree'],
     queryFn: departmentApi.tree,
     enabled: open,
   });
+
+  const { data: systemUsers = [], isLoading: usersLoading } = useQuery({
+    queryKey: ['system-users'],
+    queryFn: userApi.list,
+    enabled: open,
+  });
+
+  const isLoading = deptLoading || usersLoading;
 
   // Auto-expand first level
   React.useEffect(() => {
@@ -445,20 +453,25 @@ const AddMemberModal: React.FC<AddMemberModalProps> = ({
     }
   }, [deptTree, expandedKeys.length]);
 
-  // Collect all users for search
+  // Collect all users for search (from /api/v1/users)
   const allUsers = useMemo(() => {
-    const users: (DepartmentUser & { deptName: string })[] = [];
+    // Build dept name lookup from tree
+    const deptNameMap = new Map<string, string>();
     const traverse = (nodes: DepartmentTreeNode[]) => {
       for (const node of nodes) {
         for (const u of node.users) {
-          users.push({ ...u, deptName: node.name });
+          deptNameMap.set(u.id, node.name);
         }
         traverse(node.children);
       }
     };
     traverse(deptTree);
-    return users;
-  }, [deptTree]);
+
+    return systemUsers.map((u) => ({
+      ...u,
+      deptName: deptNameMap.get(u.id) || '',
+    }));
+  }, [systemUsers, deptTree]);
 
   const filteredUsers = useMemo(() => {
     if (!search) return null; // null means show tree view
