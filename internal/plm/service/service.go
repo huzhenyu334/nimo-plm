@@ -28,6 +28,8 @@ type Services struct {
 	Automation *AutomationService
 	// V2 新增
 	ProjectBOM *ProjectBOMService
+	// V14 SKU
+	SKU *SKUService
 }
 
 // NewServices 创建服务集合
@@ -68,6 +70,8 @@ func NewServices(repos *repository.Repositories, rdb *redis.Client, cfg *config.
 		Automation: nil, // Will be initialized with logger later if needed
 		// V2 新增
 		ProjectBOM: NewProjectBOMService(repos.ProjectBOM, repos.Project, repos.Deliverable, repos.Material),
+		// V14 SKU
+		SKU: NewSKUService(repos.SKU, repos.ProjectBOM),
 	}
 }
 

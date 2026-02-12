@@ -109,6 +109,8 @@ func (PRItem) TableName() string {
 // PR行项状态
 const (
 	PRItemStatusPending    = "pending"
+	PRItemStatusSampling   = "sampling"   // 打样中
+	PRItemStatusQuoting    = "quoting"    // 报价中
 	PRItemStatusSourcing   = "sourcing"
 	PRItemStatusOrdered    = "ordered"
 	PRItemStatusShipped    = "shipped"
@@ -122,7 +124,9 @@ const (
 
 // ValidPRItemTransitions 合法的PR行项状态流转
 var ValidPRItemTransitions = map[string][]string{
-	PRItemStatusPending:    {PRItemStatusSourcing},
+	PRItemStatusPending:    {PRItemStatusSourcing, PRItemStatusSampling},
+	PRItemStatusSampling:   {PRItemStatusQuoting},
+	PRItemStatusQuoting:    {PRItemStatusSourcing},
 	PRItemStatusSourcing:   {PRItemStatusOrdered},
 	PRItemStatusOrdered:    {PRItemStatusShipped},
 	PRItemStatusShipped:    {PRItemStatusReceived},

@@ -36,6 +36,10 @@ type Repositories struct {
 	TaskForm        *TaskFormRepository
 	// V13 CMF
 	CMF             *CMFRepository
+	// V14 SKU
+	SKU             *SKURepository
+	// V15 图纸版本管理
+	PartDrawing     *PartDrawingRepository
 }
 
 // NewRepositories 创建仓库集合
@@ -64,5 +68,9 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		TaskForm:        NewTaskFormRepository(db),
 		// V13 CMF
 		CMF:             NewCMFRepository(db),
+		// V14 SKU
+		SKU:             NewSKURepository(db),
+		// V15 图纸版本管理
+		PartDrawing:     NewPartDrawingRepository(db),
 	}
 }

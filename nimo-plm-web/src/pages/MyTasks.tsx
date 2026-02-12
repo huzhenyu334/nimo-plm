@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSSE } from '@/hooks/useSSE';
 import {
@@ -17,34 +17,32 @@ import {
   Avatar,
   Empty,
   Spin,
-  Divider,
   Descriptions,
   Table,
-  Card,
   Alert,
+  Card,
+  Progress,
+  Tooltip,
 } from 'antd';
 import {
   UploadOutlined,
   CheckCircleOutlined,
   UserOutlined,
-  ClockCircleOutlined,
-  CloseOutlined,
-  CalendarOutlined,
+  ArrowLeftOutlined,
   FolderOutlined,
-  CheckOutlined,
-  InboxOutlined,
   FileExcelOutlined,
-  DeleteOutlined,
 } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload';
+import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { projectApi, Task } from '@/api/projects';
-import { taskFormApi, TaskFormField, TaskForm, ParsedBOMItem } from '@/api/taskForms';
+import { taskFormApi, TaskFormField, TaskForm } from '@/api/taskForms';
 import { userApi, User } from '@/api/users';
 import { workflowApi } from '@/api/workflow';
 import { taskRoleApi, TaskRole } from '@/constants/roles';
+import BOMEditableTable, { type BOMItemRecord } from '@/components/BOMEditableTable';
 
-const { Text } = Typography;
+const { Text, Title } = Typography;
 
 // ========== Status Configuration ==========
 
@@ -66,28 +64,20 @@ const filterItems = [
   { key: 'rejected',    label: '已驳回' },
 ];
 
-// ========== Status Circle ==========
+// ========== UserTag Component (Feishu-style) ==========
 
-const StatusCircle: React.FC<{ status: string; size?: number }> = ({ status, size = 18 }) => {
-  const cfg = statusConfig[status] || statusConfig.pending;
-  if (status === 'completed') {
-    return (
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: size, height: size, borderRadius: '50%', background: cfg.color, flexShrink: 0,
-      }}>
-        <CheckOutlined style={{ color: '#fff', fontSize: size * 0.55 }} />
-      </span>
-    );
-  }
-  const isFilled = status === 'in_progress';
+const UserTag: React.FC<{ name?: string; avatarUrl?: string }> = ({ name, avatarUrl }) => {
+  if (!name) return <Text type="secondary" style={{ fontSize: 11 }}>-</Text>;
   return (
     <span style={{
-      display: 'inline-block', width: size, height: size, borderRadius: '50%',
-      border: `2px solid ${cfg.color}`,
-      background: isFilled ? cfg.color : 'transparent',
-      flexShrink: 0, boxSizing: 'border-box',
-    }} />
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      background: '#f0f0f0', borderRadius: 12, padding: '2px 8px 2px 2px',
+    }}>
+      <Avatar size={20} src={avatarUrl} style={{ background: '#1677ff', fontSize: 11, flexShrink: 0 }}>
+        {name[0]}
+      </Avatar>
+      <span style={{ fontSize: 12, lineHeight: '20px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 60 }}>{name}</span>
+    </span>
   );
 };
 
@@ -163,116 +153,73 @@ const RoleAssignmentField: React.FC<{
 // ========== BOM Upload Field ==========
 
 const BOMUploadField: React.FC<{
-  value?: { filename: string; items: ParsedBOMItem[]; item_count: number };
-  onChange?: (value: { filename: string; items: ParsedBOMItem[]; item_count: number } | undefined) => void;
-}> = ({ value, onChange }) => {
+  value?: { filename: string; items: BOMItemRecord[]; item_count: number };
+  onChange?: (value: { filename: string; items: BOMItemRecord[]; item_count: number } | undefined) => void;
+  bomType?: 'EBOM' | 'SBOM';
+  onSaveDraft?: () => void;
+}> = ({ value, onChange, bomType = 'EBOM', onSaveDraft }) => {
   const [parsing, setParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleUpload = async (file: File) => {
+  const items: BOMItemRecord[] = value?.items || [];
+
+  const emitChange = (newItems: BOMItemRecord[], filename?: string) => {
+    onChange?.({
+      filename: filename || value?.filename || '手动录入',
+      items: newItems,
+      item_count: newItems.length,
+    });
+    // Directly trigger draft save, bypassing unreliable Form.onFieldsChange for custom components
+    onSaveDraft?.();
+  };
+
+  const handleImport = async (file: File) => {
     setError(null);
     setParsing(true);
     try {
       const result = await taskFormApi.parseBOM(file);
-      const items = result.items || [];
-      onChange?.({ filename: file.name, items, item_count: items.length });
+      const parsed = result.items || [];
+      emitChange(parsed, file.name);
     } catch (err: any) {
       const errMsg = err?.response?.data?.error || err?.response?.data?.message || '解析BOM文件失败';
       setError(errMsg);
-      onChange?.(undefined);
     } finally {
       setParsing(false);
     }
   };
 
-  const handleRemove = () => {
-    onChange?.(undefined);
-    setError(null);
-  };
-
-  // Category breakdown
-  const categoryStats = useMemo(() => {
-    if (!value?.items?.length) return [];
-    const map: Record<string, number> = {};
-    for (const item of value.items) {
-      const cat = item.category || '未分类';
-      map[cat] = (map[cat] || 0) + 1;
-    }
-    return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [value?.items]);
-
-  const columns = [
-    { title: '序号', dataIndex: 'item_number', key: 'item_number', width: 50, align: 'center' as const },
-    { title: '位号', dataIndex: 'reference', key: 'reference', width: 80, ellipsis: true },
-    { title: '名称', dataIndex: 'name', key: 'name', width: 100, ellipsis: true },
-    { title: '规格', dataIndex: 'specification', key: 'specification', width: 120, ellipsis: true },
-    { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 50, align: 'center' as const },
-    { title: '单位', dataIndex: 'unit', key: 'unit', width: 45, align: 'center' as const },
-    { title: '类别', dataIndex: 'category', key: 'category', width: 70, ellipsis: true },
-    { title: '制造商', dataIndex: 'manufacturer', key: 'manufacturer', width: 90, ellipsis: true },
-  ];
-
-  if (!value) {
-    return (
-      <div>
-        <Upload.Dragger
-          accept=".rep,.xlsx,.xls"
-          showUploadList={false}
-          beforeUpload={(file) => { handleUpload(file); return false; }}
-          disabled={parsing}
-        >
-          {parsing ? (
-            <div style={{ padding: '12px 0' }}>
-              <Spin />
-              <div style={{ marginTop: 8, color: '#999', fontSize: 13 }}>正在解析BOM文件...</div>
-            </div>
-          ) : (
-            <div style={{ padding: '8px 0' }}>
-              <InboxOutlined style={{ fontSize: 32, color: '#1677ff' }} />
-              <div style={{ marginTop: 6, fontSize: 13, color: '#666' }}>点击或拖拽上传BOM文件</div>
-              <div style={{ fontSize: 11, color: '#999' }}>支持 .rep (PADS)、.xlsx、.xls</div>
-            </div>
-          )}
-        </Upload.Dragger>
-        {error && <Alert message={error} type="error" showIcon style={{ marginTop: 8 }} closable onClose={() => setError(null)} />}
-      </div>
-    );
-  }
-
   return (
-    <Card size="small" bodyStyle={{ padding: 8 }}>
+    <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <Space size={8}>
-          <FileExcelOutlined style={{ color: '#52c41a', fontSize: 16 }} />
-          <span style={{ fontSize: 13, fontWeight: 500 }}>{value.filename}</span>
-          <Tag color="blue">{value.item_count} 项物料</Tag>
+          <Upload
+            accept=".rep,.xlsx,.xls"
+            showUploadList={false}
+            beforeUpload={(file) => { handleImport(file); return false; }}
+            disabled={parsing}
+          >
+            <Button size="small" icon={<UploadOutlined />} loading={parsing}>导入模板</Button>
+          </Upload>
+          {value?.filename && value.filename !== '手动录入' && (
+            <span style={{ fontSize: 12, color: '#999' }}>
+              <FileExcelOutlined style={{ color: '#52c41a', marginRight: 4 }} />{value.filename}
+            </span>
+          )}
         </Space>
-        <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={handleRemove}>重新上传</Button>
       </div>
-      {categoryStats.length > 0 && (
-        <div style={{ marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          {categoryStats.map(([cat, count]) => (
-            <Tag key={cat} style={{ fontSize: 11 }}>{cat}: {count}</Tag>
-          ))}
-        </div>
-      )}
-      <Table
-        columns={columns}
-        dataSource={value.items}
-        rowKey="item_number"
-        size="small"
-        pagination={value.items.length > 10 ? { pageSize: 10, size: 'small', showTotal: (t) => `共 ${t} 条` } : false}
-        scroll={{ x: 600 }}
-        style={{ fontSize: 12 }}
-        rowClassName={(_, idx) => idx % 2 === 1 ? 'ant-table-row-alt' : ''}
+      {error && <Alert message={error} type="error" showIcon style={{ marginBottom: 8 }} closable onClose={() => setError(null)} />}
+      <BOMEditableTable
+        bomType={bomType}
+        items={items}
+        onChange={(newItems) => emitChange(newItems)}
       />
-    </Card>
+    </div>
   );
 };
 
 // ========== BOM Data Display (read-only) ==========
 
-const BOMDataDisplay: React.FC<{ data: { filename: string; items: ParsedBOMItem[]; item_count: number } }> = ({ data }) => {
+const BOMDataDisplay: React.FC<{ data: { filename: string; items: BOMItemRecord[]; item_count: number }; bomType?: 'EBOM' | 'SBOM' }> = ({ data, bomType = 'EBOM' }) => {
   const [expanded, setExpanded] = useState(false);
 
   const categoryStats = useMemo(() => {
@@ -285,16 +232,32 @@ const BOMDataDisplay: React.FC<{ data: { filename: string; items: ParsedBOMItem[
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   }, [data?.items]);
 
-  const columns = [
-    { title: '序号', dataIndex: 'item_number', key: 'item_number', width: 50, align: 'center' as const },
-    { title: '位号', dataIndex: 'reference', key: 'reference', width: 80, ellipsis: true },
-    { title: '名称', dataIndex: 'name', key: 'name', width: 100, ellipsis: true },
-    { title: '规格', dataIndex: 'specification', key: 'specification', width: 120, ellipsis: true },
-    { title: '数量', dataIndex: 'quantity', key: 'quantity', width: 50, align: 'center' as const },
-    { title: '单位', dataIndex: 'unit', key: 'unit', width: 45, align: 'center' as const },
-    { title: '类别', dataIndex: 'category', key: 'category', width: 70, ellipsis: true },
-    { title: '制造商', dataIndex: 'manufacturer', key: 'manufacturer', width: 90, ellipsis: true },
+  const ebomColumns = [
+    { title: '序号', dataIndex: 'item_number', width: 50, align: 'center' as const },
+    { title: '位号', dataIndex: 'reference', width: 80, ellipsis: true },
+    { title: '名称', dataIndex: 'name', width: 100, ellipsis: true },
+    { title: '规格', dataIndex: 'specification', width: 120, ellipsis: true },
+    { title: '数量', dataIndex: 'quantity', width: 50, align: 'center' as const },
+    { title: '单位', dataIndex: 'unit', width: 45, align: 'center' as const },
+    { title: '类别', dataIndex: 'category', width: 70, ellipsis: true },
+    { title: '制造商', dataIndex: 'manufacturer', width: 90, ellipsis: true },
   ];
+
+  const sbomColumns = [
+    { title: '序号', dataIndex: 'item_number', width: 50, align: 'center' as const },
+    { title: '名称', dataIndex: 'name', width: 100, ellipsis: true },
+    { title: '规格', dataIndex: 'specification', width: 120, ellipsis: true },
+    { title: '数量', dataIndex: 'quantity', width: 50, align: 'center' as const },
+    { title: '单位', dataIndex: 'unit', width: 45, align: 'center' as const },
+    { title: '材质', dataIndex: 'material_type', width: 80, ellipsis: true },
+    { title: '工艺类型', dataIndex: 'process_type', width: 80, ellipsis: true },
+    { title: '图纸编号', dataIndex: 'drawing_no', width: 90, ellipsis: true },
+    { title: '重量(g)', dataIndex: 'weight_grams', width: 70, align: 'right' as const },
+    { title: '目标价', dataIndex: 'target_price', width: 80, align: 'right' as const,
+      render: (v: number) => v != null ? `¥${Number(v).toFixed(2)}` : '-' },
+  ];
+
+  const columns = bomType === 'SBOM' ? sbomColumns : ebomColumns;
 
   return (
     <div>
@@ -302,6 +265,7 @@ const BOMDataDisplay: React.FC<{ data: { filename: string; items: ParsedBOMItem[
         <FileExcelOutlined style={{ color: '#52c41a' }} />
         <span style={{ fontSize: 13 }}>{data.filename}</span>
         <Tag color="blue">{data.item_count} 项物料</Tag>
+        <Tag>{bomType === 'SBOM' ? '结构BOM' : '电子BOM'}</Tag>
         <Button type="link" size="small" onClick={() => setExpanded(!expanded)} style={{ padding: 0 }}>
           {expanded ? '收起' : '展开明细'}
         </Button>
@@ -321,7 +285,7 @@ const BOMDataDisplay: React.FC<{ data: { filename: string; items: ParsedBOMItem[
             rowKey="item_number"
             size="small"
             pagination={data.items.length > 10 ? { pageSize: 10, size: 'small' } : false}
-            scroll={{ x: 600 }}
+            scroll={{ x: bomType === 'SBOM' ? 800 : 600 }}
           />
         </div>
       )}
@@ -371,7 +335,7 @@ const FormDataDisplay: React.FC<{ projectId: string; taskId: string }> = ({ proj
           if (field.type === 'bom_upload' && value && typeof value === 'object' && value.items) {
             return (
               <Descriptions.Item key={field.key} label={field.label}>
-                <BOMDataDisplay data={value} />
+                <BOMDataDisplay data={value} bomType={field.bom_type || 'EBOM'} />
               </Descriptions.Item>
             );
           }
@@ -406,13 +370,13 @@ const FormDataDisplay: React.FC<{ projectId: string; taskId: string }> = ({ proj
   );
 };
 
-// ========== Task Detail Panel ==========
+// ========== Task Detail Full Page ==========
 
-const TaskDetailPanel: React.FC<{
+const TaskDetailView: React.FC<{
   task: Task;
-  onClose: () => void;
+  onBack: () => void;
   onRefresh: () => void;
-}> = ({ task, onClose, onRefresh }) => {
+}> = ({ task, onBack, onRefresh }) => {
   const [taskForm, setTaskForm] = useState<TaskForm | null>(null);
   const [formLoading, setFormLoading] = useState(true);
   const [fileListMap, setFileListMap] = useState<Record<string, UploadFile[]>>({});
@@ -425,15 +389,52 @@ const TaskDetailPanel: React.FC<{
     queryFn: () => userApi.list(),
   });
 
-  React.useEffect(() => {
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftSavingRef = useRef(false);
+
+  useEffect(() => {
     setFormLoading(true);
     form.resetFields();
     setFileListMap({});
-    taskFormApi.getForm(task.project_id, task.id)
-      .then((f) => setTaskForm(f))
-      .catch(() => setTaskForm(null))
+    Promise.all([
+      taskFormApi.getForm(task.project_id, task.id),
+      task.status === 'in_progress' ? taskFormApi.getDraft(task.id) : Promise.resolve(null),
+    ]).then(([f, draft]) => {
+      setTaskForm(f);
+      if (draft?.data && f?.fields?.length) {
+        form.setFieldsValue(draft.data);
+      }
+    }).catch(() => setTaskForm(null))
       .finally(() => setFormLoading(false));
+    return () => {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    };
   }, [task.project_id, task.id]);
+
+  const saveDraftDebounced = useCallback(() => {
+    console.log('[Draft] saveDraftDebounced called');
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(async () => {
+      console.log('[Draft] setTimeout fired, draftSaving:', draftSavingRef.current);
+      if (draftSavingRef.current) return;
+      draftSavingRef.current = true;
+      try {
+        const values = form.getFieldsValue();
+        console.log('[Draft] form values:', JSON.stringify(values).slice(0, 200));
+        console.log('[Draft] task.id:', task.id);
+        await taskFormApi.saveDraft(task.id, values);
+        console.log('[Draft] save success');
+      } catch (err: any) {
+        const status = err?.response?.status;
+        console.error('[Draft Save] failed:', status, err?.response?.data || err);
+        if (status === 401) {
+          message.warning('登录已过期，请刷新页面');
+        } else {
+          message.warning('草稿保存失败');
+        }
+      } finally { draftSavingRef.current = false; }
+    }, 1000);
+  }, [task.id, form]);
 
   const handleError = (err: any) => {
     const status = err?.response?.status;
@@ -544,7 +545,7 @@ const TaskDetailPanel: React.FC<{
         </Select>
       );
       case 'role_assignment': return <RoleAssignmentField allUsers={allUsers} projectId={task.project_id} />;
-      case 'bom_upload': return <BOMUploadField />;
+      case 'bom_upload': return <BOMUploadField bomType={field.bom_type || 'EBOM'} onSaveDraft={saveDraftDebounced} />;
       default: return <Input placeholder={field.placeholder} />;
     }
   };
@@ -554,75 +555,92 @@ const TaskDetailPanel: React.FC<{
   const isInProgress = task.status === 'in_progress';
   const showFormData = task.status === 'submitted' || task.status === 'completed' || task.status === 'reviewing';
   const projectName = (task as any).project?.name || (task as any).project_name || '-';
-  const assigneeName = task.assignee?.name || (task as any).assignee_name;
+  const remainDays = task.due_date ? dayjs(task.due_date).diff(dayjs(), 'day') : null;
 
   return (
-    <div style={{
-      width: 480, borderLeft: '1px solid #e8e8e8',
-      display: 'flex', flexDirection: 'column', background: '#fff', flexShrink: 0,
-    }}>
-      {/* Header */}
-      <div style={{
-        padding: '16px 20px', borderBottom: '1px solid #f0f0f0',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-      }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8, wordBreak: 'break-word', lineHeight: 1.4 }}>
-            {task.title}
-          </div>
-          <Space size={8}>
-            <Tag color={cfg.tagColor}>{cfg.text}</Tag>
-            {(task.code || task.task_code) && <Text code style={{ fontSize: 12 }}>{task.code || task.task_code}</Text>}
-          </Space>
-        </div>
-        <Button type="text" icon={<CloseOutlined />} onClick={onClose} style={{ flexShrink: 0, marginLeft: 8 }} />
-      </div>
+    <div style={{ padding: 24 }}>
+      <Button type="link" icon={<ArrowLeftOutlined />} onClick={onBack} style={{ padding: 0, marginBottom: 16 }}>
+        返回任务列表
+      </Button>
 
-      {/* Scrollable content */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px' }}>
-        {/* Task info fields */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <Text type="secondary" style={{ width: 70, flexShrink: 0, fontSize: 13 }}>负责人</Text>
-            {assigneeName ? (
-              <Space size={8}>
-                <Avatar size={24} src={task.assignee?.avatar_url} icon={<UserOutlined />}>{assigneeName[0]}</Avatar>
-                <span style={{ fontSize: 13 }}>{assigneeName}</span>
-              </Space>
-            ) : <Text type="secondary" style={{ fontSize: 13 }}>未指派</Text>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <Text type="secondary" style={{ width: 70, flexShrink: 0, fontSize: 13 }}>截止日期</Text>
-            {task.due_date ? (
-              <Space size={6}>
-                <CalendarOutlined style={{ color: dayjs(task.due_date).isBefore(dayjs(), 'day') ? '#ff4d4f' : '#999', fontSize: 13 }} />
-                <Text type={dayjs(task.due_date).isBefore(dayjs(), 'day') ? 'danger' : undefined} style={{ fontSize: 13 }}>
-                  {dayjs(task.due_date).format('YYYY-MM-DD')}
-                </Text>
-              </Space>
-            ) : <Text type="secondary" style={{ fontSize: 13 }}>无</Text>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <Text type="secondary" style={{ width: 70, flexShrink: 0, fontSize: 13 }}>所属项目</Text>
-            <Space size={6}>
-              <FolderOutlined style={{ color: '#1677ff', fontSize: 13 }} />
-              <span style={{ fontSize: 13 }}>{projectName}</span>
+      {/* Task header */}
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+          <div>
+            <Title level={4} style={{ margin: 0 }}>
+              {task.title}
+              <Tag color={cfg.tagColor} style={{ marginLeft: 8, verticalAlign: 'middle' }}>{cfg.text}</Tag>
+            </Title>
+            <Space size={8} style={{ marginTop: 4 }}>
+              {(task.code || task.task_code) && <Text code style={{ fontSize: 12 }}>{task.code || task.task_code}</Text>}
+              <Text type="secondary" style={{ fontSize: 12 }}><FolderOutlined style={{ marginRight: 4 }} />{projectName}</Text>
             </Space>
           </div>
+          {/* Action buttons */}
+          <Space>
+            {task.status === 'pending' && (
+              <Button type="primary" loading={starting} onClick={handleStart}
+                style={{ background: '#52c41a', borderColor: '#52c41a' }}>
+                开始任务
+              </Button>
+            )}
+            {task.status === 'in_progress' && (
+              <Button type="primary" loading={submitting} onClick={handleSubmit}
+                icon={<CheckCircleOutlined />}
+                style={{ background: '#52c41a', borderColor: '#52c41a' }}>
+                {hasForm ? '提交表单' : '提交任务'}
+              </Button>
+            )}
+            {task.status === 'rejected' && (
+              <Button type="primary" loading={starting} onClick={handleStart}
+                style={{ background: '#fa8c16', borderColor: '#fa8c16' }}>
+                重新开始
+              </Button>
+            )}
+          </Space>
         </div>
 
-        <Divider style={{ margin: '0 0 16px 0' }} />
+        <Descriptions column={3} size="small" bordered>
+          <Descriptions.Item label="负责人">
+            <UserTag name={task.assignee?.name || (task as any).assignee_name} avatarUrl={task.assignee?.avatar_url} />
+          </Descriptions.Item>
+          <Descriptions.Item label="创建人">
+            <UserTag name={task.creator?.name} avatarUrl={task.creator?.avatar_url} />
+          </Descriptions.Item>
+          <Descriptions.Item label="剩余天数">
+            <span style={{ fontWeight: 600, color: remainDays == null ? '#999' : remainDays < 0 ? '#ff4d4f' : remainDays <= 3 ? '#fa8c16' : '#52c41a' }}>
+              {remainDays != null ? `${remainDays}天` : '-'}
+            </span>
+          </Descriptions.Item>
+          <Descriptions.Item label="开始日期">
+            {task.start_date ? dayjs(task.start_date).format('YYYY-MM-DD') : '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="截止日期">
+            {task.due_date ? dayjs(task.due_date).format('YYYY-MM-DD') : '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="进度">
+            <Progress percent={task.progress} size="small" style={{ width: 120 }} />
+          </Descriptions.Item>
+        </Descriptions>
 
-        {/* Form area for in_progress tasks */}
+        {task.description && (
+          <div style={{ marginTop: 12 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>{task.description}</Text>
+          </div>
+        )}
+      </Card>
+
+      {/* Form area - full width */}
+      <Card>
         {formLoading ? (
-          <div style={{ textAlign: 'center', padding: 20 }}><Spin size="small" /></div>
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         ) : hasForm && isInProgress ? (
           <div>
-            <Text strong style={{ fontSize: 14, marginBottom: 12, display: 'block' }}>任务表单</Text>
+            <Title level={5} style={{ marginBottom: 16 }}>任务表单</Title>
             {taskForm!.description && (
-              <div style={{ marginBottom: 12, color: '#666', fontSize: 12 }}>{taskForm!.description}</div>
+              <div style={{ marginBottom: 12, color: '#666', fontSize: 13 }}>{taskForm!.description}</div>
             )}
-            <Form form={form} layout="vertical" preserve={false} size="small">
+            <Form form={form} layout="vertical" preserve={false} onFieldsChange={saveDraftDebounced}>
               {taskForm!.fields.map((field) => (
                 <Form.Item
                   key={field.key}
@@ -639,46 +657,10 @@ const TaskDetailPanel: React.FC<{
           </div>
         ) : showFormData ? (
           <FormDataDisplay projectId={task.project_id} taskId={task.id} />
-        ) : null}
-      </div>
-
-      {/* Footer actions */}
-      <div style={{ padding: '12px 20px', borderTop: '1px solid #f0f0f0' }}>
-        {task.status === 'pending' && (
-          <Button type="primary" block size="large" loading={starting} onClick={handleStart}
-            style={{ background: '#52c41a', borderColor: '#52c41a' }}>
-            开始任务
-          </Button>
+        ) : (
+          <Empty description="该任务暂无表单" />
         )}
-        {task.status === 'in_progress' && (
-          <Button type="primary" block size="large" loading={submitting} onClick={handleSubmit}
-            icon={<CheckCircleOutlined />}
-            style={{ background: '#52c41a', borderColor: '#52c41a' }}>
-            {hasForm ? '提交表单' : '提交任务'}
-          </Button>
-        )}
-        {task.status === 'submitted' && (
-          <div style={{ textAlign: 'center', padding: 8, color: '#fa8c16', fontSize: 14 }}>
-            <ClockCircleOutlined style={{ marginRight: 8 }} />已提交，等待审批/确认
-          </div>
-        )}
-        {task.status === 'reviewing' && (
-          <div style={{ textAlign: 'center', padding: 8, color: '#faad14', fontSize: 14 }}>
-            <ClockCircleOutlined style={{ marginRight: 8 }} />审批中
-          </div>
-        )}
-        {task.status === 'completed' && (
-          <div style={{ textAlign: 'center', padding: 8, color: '#52c41a', fontSize: 14 }}>
-            <CheckCircleOutlined style={{ marginRight: 8 }} />已完成
-          </div>
-        )}
-        {task.status === 'rejected' && (
-          <Button type="primary" block size="large" loading={starting} onClick={handleStart}
-            style={{ background: '#fa8c16', borderColor: '#fa8c16' }}>
-            重新开始
-          </Button>
-        )}
-      </div>
+      </Card>
     </div>
   );
 };
@@ -719,152 +701,118 @@ const MyTasks: React.FC = () => {
     }, [queryClient]),
   });
 
-  return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 64px)', background: '#fff' }}>
-      {/* ===== Left Sidebar ===== */}
-      <div style={{
-        width: 200, borderRight: '1px solid #f0f0f0', flexShrink: 0,
-        background: '#fafafa', display: 'flex', flexDirection: 'column',
-      }}>
-        <div style={{ padding: '20px 16px 12px', fontWeight: 600, fontSize: 16, color: '#333' }}>
-          我的任务
-        </div>
-        <div style={{ flex: 1 }}>
-          {filterItems.map((item) => {
-            const isActive = activeFilter === item.key;
-            return (
-              <div
-                key={item.key}
-                onClick={() => { setActiveFilter(item.key); setPage(1); setSelectedTaskId(null); }}
-                style={{
-                  padding: '10px 16px', cursor: 'pointer',
-                  background: isActive ? '#e6f4ff' : 'transparent',
-                  color: isActive ? '#1677ff' : '#555',
-                  fontWeight: isActive ? 500 : 400,
-                  borderRight: isActive ? '3px solid #1677ff' : '3px solid transparent',
-                  fontSize: 13, transition: 'all 0.15s',
-                }}
-              >
-                {item.label}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ===== Middle: Task List ===== */}
-      <div style={{ flex: 1, minWidth: 280, display: 'flex', flexDirection: 'column' }}>
-        {/* List header */}
-        <div style={{
-          padding: '16px 20px', borderBottom: '1px solid #f0f0f0',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          flexShrink: 0,
-        }}>
-          <Space size={8}>
-            <Text strong style={{ fontSize: 15 }}>
-              {filterItems.find((f) => f.key === activeFilter)?.label || '全部任务'}
-            </Text>
-            <Text type="secondary" style={{ fontSize: 13 }}>{total} 条</Text>
+  // Table columns for task list
+  const taskColumns: ColumnsType<Task> = [
+    {
+      title: '任务标题', dataIndex: 'title', ellipsis: true,
+      render: (title: string, task: Task) => {
+        const cfg = statusConfig[task.status] || statusConfig.pending;
+        return (
+          <Space size={6}>
+            <Tag color={cfg.tagColor} style={{ fontSize: 10, padding: '0 4px', margin: 0, lineHeight: '18px' }}>{cfg.text}</Tag>
+            <Tooltip title={title}>
+              <span style={{
+                fontWeight: 500, fontSize: 13,
+                color: task.status === 'completed' ? '#999' : '#333',
+                textDecoration: task.status === 'completed' ? 'line-through' : 'none',
+              }}>
+                {title}
+              </span>
+            </Tooltip>
           </Space>
-        </div>
+        );
+      },
+    },
+    {
+      title: '负责人', dataIndex: 'assignee', width: 120, align: 'center',
+      render: (_: any, task: Task) => (
+        <UserTag name={task.assignee?.name || (task as any).assignee_name} avatarUrl={task.assignee?.avatar_url} />
+      ),
+    },
+    {
+      title: '剩余天数', dataIndex: 'due_date', width: 85, align: 'center',
+      render: (dueDate: string) => {
+        if (!dueDate) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+        const days = dayjs(dueDate).diff(dayjs(), 'day');
+        return (
+          <span style={{ fontWeight: 500, fontSize: 12,
+            color: days < 0 ? '#ff4d4f' : days <= 3 ? '#fa8c16' : '#52c41a' }}>
+            {days}
+          </span>
+        );
+      },
+    },
+    {
+      title: '开始日期', dataIndex: 'start_date', width: 90, align: 'center',
+      render: (d: string) => d ? <Text style={{ fontSize: 12 }}>{dayjs(d).format('MM-DD')}</Text> : <Text type="secondary" style={{ fontSize: 12 }}>-</Text>,
+    },
+    {
+      title: '截止日期', dataIndex: 'due_date', width: 90, align: 'center',
+      key: 'due_date_display',
+      render: (d: string) => d ? <Text style={{ fontSize: 12 }}>{dayjs(d).format('MM-DD')}</Text> : <Text type="secondary" style={{ fontSize: 12 }}>-</Text>,
+    },
+    {
+      title: '创建人', dataIndex: 'creator', width: 120, align: 'center',
+      render: (_: any, task: Task) => (
+        <UserTag name={task.creator?.name} avatarUrl={task.creator?.avatar_url} />
+      ),
+    },
+  ];
 
-        {/* Column headers */}
-        <div style={{
-          padding: '8px 20px', borderBottom: '1px solid #f0f0f0',
-          display: 'flex', alignItems: 'center', fontSize: 12, color: '#999', flexShrink: 0,
-        }}>
-          <span style={{ width: 30 }} />
-          <span style={{ flex: 1 }}>任务标题</span>
-          <span style={{ width: 120, textAlign: 'right' }}>负责人</span>
-        </div>
+  // If a task is selected, show full-page detail
+  if (selectedTask) {
+    return (
+      <TaskDetailView
+        task={selectedTask}
+        onBack={() => setSelectedTaskId(null)}
+        onRefresh={handleRefresh}
+      />
+    );
+  }
 
-        {/* Task list */}
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          {isLoading ? (
-            <div style={{ textAlign: 'center', padding: 60 }}><Spin /></div>
-          ) : tasks.length === 0 ? (
-            <Empty description="暂无任务" style={{ padding: 60 }} />
-          ) : (
-            <>
-              {tasks.map((task) => {
-                const isSelected = task.id === selectedTaskId;
-                const assigneeName = task.assignee?.name || (task as any).assignee_name;
-                const projectName = (task as any).project?.name || (task as any).project_name;
-                const isOverdue = task.due_date && dayjs(task.due_date).isBefore(dayjs(), 'day') && task.status !== 'completed';
-
-                return (
-                  <div
-                    key={task.id}
-                    onClick={() => setSelectedTaskId(task.id)}
-                    style={{
-                      padding: '10px 20px', cursor: 'pointer',
-                      background: isSelected ? '#e6f4ff' : 'transparent',
-                      borderBottom: '1px solid #f5f5f5',
-                      borderLeft: isSelected ? '3px solid #1677ff' : '3px solid transparent',
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#f8f9fa'; }}
-                    onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
-                  >
-                    <StatusCircle status={task.status} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        fontSize: 13, fontWeight: 500,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        color: task.status === 'completed' ? '#999' : '#333',
-                        textDecoration: task.status === 'completed' ? 'line-through' : 'none',
-                      }}>
-                        {task.title}
-                      </div>
-                      <div style={{
-                        fontSize: 12, color: '#999', marginTop: 2,
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}>
-                        {projectName && <span>{projectName}</span>}
-                        {task.due_date && (
-                          <span style={{ color: isOverdue ? '#ff4d4f' : '#bbb' }}>
-                            {dayjs(task.due_date).format('MM-DD')}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {assigneeName && (
-                      <Avatar size={24} src={task.assignee?.avatar_url} icon={<UserOutlined />}
-                        style={{ flexShrink: 0, fontSize: 11 }}>
-                        {assigneeName[0]}
-                      </Avatar>
-                    )}
-                  </div>
-                );
-              })}
-              {/* Pagination */}
-              {total > pageSize && (
-                <div style={{
-                  padding: '12px 20px', display: 'flex', justifyContent: 'center',
-                  alignItems: 'center', gap: 12, borderTop: '1px solid #f0f0f0',
-                }}>
-                  <Button size="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>上一页</Button>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {page} / {Math.ceil(total / pageSize)}
-                  </Text>
-                  <Button size="small" disabled={page >= Math.ceil(total / pageSize)} onClick={() => setPage((p) => p + 1)}>下一页</Button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+  return (
+    <div style={{ padding: 24 }}>
+      {/* Header with filter tabs */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <Space size={8}>
+          <Title level={4} style={{ margin: 0 }}>我的任务</Title>
+          <Text type="secondary">{total} 条</Text>
+        </Space>
+        <Space size={4}>
+          {filterItems.map((item) => (
+            <Button
+              key={item.key}
+              type={activeFilter === item.key ? 'primary' : 'default'}
+              size="small"
+              onClick={() => { setActiveFilter(item.key); setPage(1); }}
+            >
+              {item.label}
+            </Button>
+          ))}
+        </Space>
       </div>
 
-      {/* ===== Right: Task Detail Panel ===== */}
-      {selectedTask && (
-        <TaskDetailPanel
-          task={selectedTask}
-          onClose={() => setSelectedTaskId(null)}
-          onRefresh={handleRefresh}
-        />
-      )}
+      {/* Task Table */}
+      <Table<Task>
+        columns={taskColumns}
+        dataSource={tasks}
+        rowKey="id"
+        size="small"
+        loading={isLoading}
+        locale={{ emptyText: <Empty description="暂无任务" /> }}
+        pagination={total > pageSize ? {
+          current: page,
+          pageSize,
+          total,
+          onChange: (p) => setPage(p),
+          size: 'small',
+          showTotal: (t) => `共 ${t} 条`,
+        } : false}
+        onRow={(task) => ({
+          onClick: () => setSelectedTaskId(task.id),
+          style: { cursor: 'pointer' },
+        })}
+      />
     </div>
   );
 };

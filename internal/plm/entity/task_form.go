@@ -30,7 +30,7 @@ type TaskFormSubmission struct {
 	Files       json.RawMessage `json:"files" gorm:"type:jsonb;default:'[]'"`
 	SubmittedBy string          `json:"submitted_by" gorm:"size:32;not null"`
 	SubmittedAt time.Time       `json:"submitted_at"`
-	Version     int             `json:"version" gorm:"not null;default:1"`
+	Version     int             `json:"version" gorm:"not null;default:0"`
 }
 
 func (TaskFormSubmission) TableName() string {

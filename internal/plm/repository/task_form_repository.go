@@ -67,6 +67,39 @@ func (r *TaskFormRepository) FindLatestSubmission(ctx context.Context, taskID st
 	return &submission, nil
 }
 
+// UpsertDraftSubmission 保存草稿（version=0）
+func (r *TaskFormRepository) UpsertDraftSubmission(ctx context.Context, submission *entity.TaskFormSubmission) error {
+	var existing entity.TaskFormSubmission
+	err := r.db.WithContext(ctx).
+		Where("task_id = ? AND version = 0", submission.TaskID).
+		First(&existing).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			submission.Version = 0
+			return r.db.WithContext(ctx).Create(submission).Error
+		}
+		return err
+	}
+	existing.Data = submission.Data
+	existing.SubmittedAt = submission.SubmittedAt
+	return r.db.WithContext(ctx).Save(&existing).Error
+}
+
+// FindDraftSubmission 获取草稿（version=0）
+func (r *TaskFormRepository) FindDraftSubmission(ctx context.Context, taskID string) (*entity.TaskFormSubmission, error) {
+	var submission entity.TaskFormSubmission
+	err := r.db.WithContext(ctx).
+		Where("task_id = ? AND version = 0", taskID).
+		First(&submission).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &submission, nil
+}
+
 // FindTemplateFormsByTemplateID 根据模板ID查找模板表单
 func (r *TaskFormRepository) FindTemplateFormsByTemplateID(ctx context.Context, templateID string) ([]entity.TemplateTaskForm, error) {
 	var forms []entity.TemplateTaskForm

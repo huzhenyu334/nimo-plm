@@ -24,6 +24,7 @@ type Repositories struct {
 	Evaluation       *EvaluationRepository
 	Equipment        *EquipmentRepository
 	RFQ              *RFQRepository
+	Sampling         *SamplingRepository
 }
 
 // NewRepositories 创建SRM仓库集合
@@ -41,5 +42,6 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		Evaluation:       NewEvaluationRepository(db),
 		Equipment:        NewEquipmentRepository(db),
 		RFQ:              NewRFQRepository(db),
+		Sampling:         NewSamplingRepository(db),
 	}
 }

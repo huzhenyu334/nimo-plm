@@ -51,6 +51,8 @@ export interface Task {
   requires_approval?: boolean;
   approval_status?: string;
   dependencies?: { id: string; task_id: string; depends_on_id: string; depends_on_status?: string; dependency_type?: string }[];
+  created_by?: string;
+  creator?: { id: string; name: string; avatar_url?: string };
   created_at: string;
 }
 

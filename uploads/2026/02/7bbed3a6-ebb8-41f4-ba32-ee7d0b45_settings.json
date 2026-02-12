@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/claw/.claude/hooks/notify-openclaw.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/claw/.claude/hooks/notify-openclaw.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -206,6 +206,69 @@ func (h *TaskFormHandler) SaveTemplateTaskForm(c *gin.Context) {
 	Success(c, form)
 }
 
+// SaveFormDraft 保存表单草稿
+// PUT /my/tasks/:taskId/form-draft
+func (h *TaskFormHandler) SaveFormDraft(c *gin.Context) {
+	taskID := c.Param("taskId")
+	if taskID == "" {
+		BadRequest(c, "Task ID is required")
+		return
+	}
+
+	userID := GetUserID(c)
+
+	var req struct {
+		FormData map[string]interface{} `json:"form_data"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "Invalid request body: "+err.Error())
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// 查找表单定义
+	form, err := h.formRepo.FindByTaskID(ctx, taskID)
+	if err != nil || form == nil {
+		BadRequest(c, "该任务没有表单")
+		return
+	}
+
+	submission := &entity.TaskFormSubmission{
+		ID:          uuid.New().String()[:32],
+		FormID:      form.ID,
+		TaskID:      taskID,
+		Data:        entity.JSONB(req.FormData),
+		SubmittedBy: userID,
+		SubmittedAt: time.Now(),
+	}
+
+	if err := h.formRepo.UpsertDraftSubmission(ctx, submission); err != nil {
+		InternalError(c, "保存草稿失败: "+err.Error())
+		return
+	}
+
+	Success(c, gin.H{"message": "草稿已保存"})
+}
+
+// GetFormDraft 获取表单草稿
+// GET /my/tasks/:taskId/form-draft
+func (h *TaskFormHandler) GetFormDraft(c *gin.Context) {
+	taskID := c.Param("taskId")
+	if taskID == "" {
+		BadRequest(c, "Task ID is required")
+		return
+	}
+
+	submission, err := h.formRepo.FindDraftSubmission(c.Request.Context(), taskID)
+	if err != nil {
+		InternalError(c, "查询草稿失败: "+err.Error())
+		return
+	}
+
+	Success(c, submission)
+}
+
 // GetFormSubmission 获取最新表单提交
 // GET /projects/:id/tasks/:taskId/form/submission
 func (h *TaskFormHandler) GetFormSubmission(c *gin.Context) {

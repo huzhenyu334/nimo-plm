@@ -43,6 +43,10 @@ type Handlers struct {
 	Routing     *RoutingHandler
 	// V13 CMF
 	CMF         *CMFHandler
+	// V14 SKU
+	SKU         *SKUHandler
+	// V15 图纸版本管理
+	PartDrawing *PartDrawingHandler
 }
 
 // NewHandlers 创建处理器集合
@@ -73,6 +77,10 @@ func NewHandlers(svc *service.Services, repos *repository.Repositories, cfg *con
 	if workflowSvc != nil {
 		h.Workflow = NewWorkflowHandler(workflowSvc)
 	}
+	// V14 SKU
+	h.SKU = NewSKUHandler(svc.SKU)
+	// V15 图纸版本管理
+	h.PartDrawing = NewPartDrawingHandler(repos.PartDrawing, repos.ProjectBOM)
 	return h
 }
 

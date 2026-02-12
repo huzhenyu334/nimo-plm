@@ -78,9 +78,13 @@ type ProjectBOMItem struct {
 	SurfaceTreatment string   `json:"surface_treatment,omitempty" gorm:"size:128"`     // 表面处理：阳极氧化, 喷涂, 电镀, 丝印, UV转印, PVD
 	ProcessType      string   `json:"process_type,omitempty" gorm:"size:32"`           // 工艺类型：注塑, CNC, 冲压, 模切, 3D打印, 激光切割
 	DrawingNo        string   `json:"drawing_no,omitempty" gorm:"size:64"`             // 图纸编号
+	// Deprecated: use PartDrawing table instead
 	Drawing2DFileID  *string  `json:"drawing_2d_file_id,omitempty" gorm:"column:drawing2d_file_id;size:32"`     // 2D工程图文件ID
+	// Deprecated: use PartDrawing table instead
 	Drawing2DFileName string  `json:"drawing_2d_file_name,omitempty" gorm:"column:drawing2d_file_name;size:256"`  // 2D文件名
+	// Deprecated: use PartDrawing table instead
 	Drawing3DFileID  *string  `json:"drawing_3d_file_id,omitempty" gorm:"column:drawing3d_file_id;size:32"`     // 3D模型文件ID
+	// Deprecated: use PartDrawing table instead
 	Drawing3DFileName string  `json:"drawing_3d_file_name,omitempty" gorm:"column:drawing3d_file_name;size:256"`  // 3D文件名
 	WeightGrams      *float64 `json:"weight_grams,omitempty" gorm:"type:numeric(10,2)"` // 重量(克)
 	TargetPrice      *float64 `json:"target_price,omitempty" gorm:"type:numeric(15,4)"` // 目标单价
@@ -89,6 +93,7 @@ type ProjectBOMItem struct {
 	IsAppearancePart bool     `json:"is_appearance_part" gorm:"default:false"`          // 是否外观件
 	AssemblyMethod   string   `json:"assembly_method,omitempty" gorm:"size:32"`        // 装配方式：卡扣, 螺丝, 胶合, 超声波焊接, 热熔
 	ToleranceGrade   string   `json:"tolerance_grade,omitempty" gorm:"size:32"`        // 公差等级：普通/精密/超精密
+	IsVariant        bool     `json:"is_variant" gorm:"default:false"`                // 标记该件在SKU间可能不同
 
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
@@ -97,6 +102,7 @@ type ProjectBOMItem struct {
 	Material   *Material        `json:"material,omitempty" gorm:"foreignKey:MaterialID"`
 	ParentItem *ProjectBOMItem  `json:"parent_item,omitempty" gorm:"foreignKey:ParentItemID"`
 	Children   []ProjectBOMItem `json:"children,omitempty" gorm:"foreignKey:ParentItemID"`
+	Drawings   []PartDrawing    `json:"drawings,omitempty" gorm:"foreignKey:BOMItemID"`
 }
 
 func (ProjectBOMItem) TableName() string {

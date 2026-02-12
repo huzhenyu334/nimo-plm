@@ -10,12 +10,16 @@ export const apiClient = axios.create({
   },
 });
 
-// 请求拦截器 - 添加 token
+// 请求拦截器 - 添加 token + 处理 FormData Content-Type
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = localStorage.getItem('access_token');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+    // FormData: 删除默认Content-Type，让浏览器自动设置multipart/form-data + boundary
+    if (config.data instanceof FormData) {
+      config.headers['Content-Type'] = undefined as any;
     }
     return config;
   },

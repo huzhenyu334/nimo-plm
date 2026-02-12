@@ -103,8 +103,23 @@ export const taskFormApi = {
   uploadFile: async (file: File): Promise<{ id: string; url: string; filename: string; size: number }> => {
     const formData = new FormData();
     formData.append('files', file);
-    const response = await apiClient.post<ApiResponse<{ files: any[] }>>('/upload', formData);
-    return response.data.data.files[0];
+    const response = await apiClient.post<ApiResponse<any[]>>('/upload', formData);
+    return response.data.data[0];
+  },
+
+  // 保存表单草稿
+  saveDraft: async (taskId: string, formData: Record<string, any>): Promise<void> => {
+    await apiClient.put(`/my/tasks/${taskId}/form-draft`, { form_data: formData });
+  },
+
+  // 获取表单草稿
+  getDraft: async (taskId: string): Promise<TaskFormSubmission | null> => {
+    try {
+      const response = await apiClient.get<ApiResponse<TaskFormSubmission | null>>(`/my/tasks/${taskId}/form-draft`);
+      return response.data.data;
+    } catch {
+      return null;
+    }
   },
 
   // BOM解析预览（不保存）

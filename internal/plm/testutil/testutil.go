@@ -112,6 +112,9 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 		&entity.TaskDependency{},
 		&entity.TaskComment{},
 		&entity.TaskRole{},
+		&entity.ProjectBOM{},
+		&entity.ProjectBOMItem{},
+		&entity.PartDrawing{},
 	)
 	if err != nil {
 		t.Fatalf("Failed to migrate test tables: %v", err)

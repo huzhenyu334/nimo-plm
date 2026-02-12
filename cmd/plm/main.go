@@ -88,6 +88,22 @@ func main() {
 		zapLogger.Warn("AutoMigrate CMF tables warning", zap.Error(err))
 	}
 
+	// AutoMigrate for SKU tables
+	if err := db.AutoMigrate(
+		&entity.ProductSKU{},
+		&entity.SKUCMFConfig{},
+		&entity.SKUBOMOverride{},
+	); err != nil {
+		zapLogger.Warn("AutoMigrate SKU tables warning", zap.Error(err))
+	}
+
+	// AutoMigrate for PartDrawing table (V15: 图纸版本管理)
+	if err := db.AutoMigrate(&entity.PartDrawing{}); err != nil {
+		zapLogger.Warn("AutoMigrate PartDrawing table warning", zap.Error(err))
+	}
+	// V14: ProjectBOMItem增加is_variant字段
+	db.Exec("ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS is_variant BOOLEAN DEFAULT false")
+
 	// 清理旧的唯一索引（EmployeeNo 允许为空，不再需要唯一约束）
 	// 清理所有可能的 employee_no 唯一约束/索引
 	db.Exec("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_employee_no_key")
@@ -514,6 +530,7 @@ func main() {
 		&srmentity.Equipment{},
 		&srmentity.RFQ{},
 		&srmentity.RFQQuote{},
+		&srmentity.SamplingRequest{},
 	); err != nil {
 		zapLogger.Warn("AutoMigrate SRM tables warning", zap.Error(err))
 	}
@@ -592,13 +609,15 @@ func main() {
 	srmEquipmentSvc := srmsvc.NewEquipmentService(srmRepos.Equipment)
 	srmRFQSvc := srmsvc.NewRFQService(srmRepos.RFQ, srmRepos.PO, srmRepos.PR, srmRepos.ActivityLog, db)
 	srmPRItemSvc := srmsvc.NewPRItemService(srmRepos.PR, srmRepos.Project, srmRepos.ActivityLog, db)
-	srmHandlers := srmhandler.NewHandlers(srmSupplierSvc, srmProcurementSvc, srmInspectionSvc, srmDashboardSvc, srmRepos.PO, srmProjectSvc, srmSettlementSvc, srmCorrectiveActionSvc, srmEvaluationSvc, srmEquipmentSvc, srmRFQSvc, srmPRItemSvc)
+	srmSamplingSvc := srmsvc.NewSamplingService(srmRepos.Sampling, srmRepos.PR, srmRepos.Supplier, srmRepos.ActivityLog, db)
+	srmHandlers := srmhandler.NewHandlers(srmSupplierSvc, srmProcurementSvc, srmInspectionSvc, srmDashboardSvc, srmRepos.PO, srmProjectSvc, srmSettlementSvc, srmCorrectiveActionSvc, srmEvaluationSvc, srmEquipmentSvc, srmRFQSvc, srmPRItemSvc, srmSamplingSvc)
 
 	// SRM→飞书：注入飞书客户端到SRM各服务
 	if feishuWorkflowClient != nil {
 		srmProcurementSvc.SetFeishuClient(feishuWorkflowClient)
 		srmInspectionSvc.SetFeishuClient(feishuWorkflowClient)
 		srmCorrectiveActionSvc.SetFeishuClient(feishuWorkflowClient)
+		srmSamplingSvc.SetFeishuClient(feishuWorkflowClient)
 	}
 
 	// PLM→SRM集成：BOM创建后自动生成打样采购需求
@@ -625,7 +644,7 @@ func main() {
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
+		WriteTimeout: 0, // Disable for SSE long-lived connections
 	}
 
 	// 启动服务器
@@ -751,7 +770,15 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 			c.JSON(http.StatusNotFound, gin.H{"code": 40400, "message": "Not found"})
 			return
 		}
-		c.File("./web/plm/index.html")
+		indexData, err := os.ReadFile("./web/plm/index.html")
+		if err != nil {
+			c.String(http.StatusInternalServerError, "index.html not found")
+			return
+		}
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		c.Data(http.StatusOK, "text/html; charset=utf-8", indexData)
 	})
 
 	// API v1
@@ -990,6 +1017,26 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				projects.DELETE("/:id/cmf-specs/:specId", h.CMF.DeleteSpec)
 				projects.GET("/:id/bom-appearance-parts", h.CMF.ListAppearanceParts)
 
+				// V15: 图纸版本管理
+				projects.GET("/:id/bom-items/:itemId/drawings", h.PartDrawing.ListDrawings)
+				projects.POST("/:id/bom-items/:itemId/drawings", h.PartDrawing.UploadDrawing)
+				projects.DELETE("/:id/bom-items/:itemId/drawings/:drawingId", h.PartDrawing.DeleteDrawing)
+				projects.GET("/:id/bom-items/:itemId/drawings/:drawingId/download", h.PartDrawing.DownloadDrawing)
+				projects.GET("/:id/boms/:bomId/drawings", h.PartDrawing.ListDrawingsByBOM)
+
+				// V14: SKU管理
+				projects.GET("/:id/skus", h.SKU.ListSKUs)
+				projects.POST("/:id/skus", h.SKU.CreateSKU)
+				projects.PUT("/:id/skus/:skuId", h.SKU.UpdateSKU)
+				projects.DELETE("/:id/skus/:skuId", h.SKU.DeleteSKU)
+				projects.GET("/:id/skus/:skuId/cmf", h.SKU.GetCMFConfigs)
+				projects.PUT("/:id/skus/:skuId/cmf", h.SKU.BatchSaveCMFConfigs)
+				projects.GET("/:id/skus/:skuId/bom-overrides", h.SKU.GetBOMOverrides)
+				projects.POST("/:id/skus/:skuId/bom-overrides", h.SKU.CreateBOMOverride)
+				projects.PUT("/:id/skus/:skuId/bom-overrides/:overrideId", h.SKU.UpdateBOMOverride)
+				projects.DELETE("/:id/skus/:skuId/bom-overrides/:overrideId", h.SKU.DeleteBOMOverride)
+				projects.GET("/:id/skus/:skuId/full-bom", h.SKU.GetFullBOM)
+
 				// V2: 交付物管理
 				projects.GET("/:id/deliverables", h.Deliverable.ListByProject)
 				projects.GET("/:id/phases/:phaseId/deliverables", h.Deliverable.ListByPhase)
@@ -1012,6 +1059,8 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 			// 我的任务
 			authorized.GET("/my/tasks", h.Project.GetMyTasks)
 			authorized.POST("/my/tasks/:taskId/complete", h.Project.CompleteMyTask)
+			authorized.PUT("/my/tasks/:taskId/form-draft", h.TaskForm.SaveFormDraft)
+			authorized.GET("/my/tasks/:taskId/form-draft", h.TaskForm.GetFormDraft)
 
 			// 文件上传
 			authorized.POST("/upload", h.Upload.Upload)
@@ -1222,6 +1271,13 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 
 				// PR物料状态
 				srmGroup.PUT("/pr-items/:id/status", srmH.PRItem.UpdatePRItemStatus)
+
+				// 打样管理
+				srmGroup.POST("/pr-items/:itemId/sampling", srmH.Sampling.CreateSamplingRequest)
+				srmGroup.GET("/pr-items/:itemId/sampling", srmH.Sampling.ListSamplingRequests)
+				srmGroup.PUT("/sampling/:id/status", srmH.Sampling.UpdateSamplingStatus)
+				srmGroup.POST("/sampling/:id/request-verify", srmH.Sampling.RequestVerify)
+				srmGroup.POST("/sampling/verify-callback", srmH.Sampling.VerifyCallback)
 
 				// 操作日志
 				srmGroup.GET("/activities/:entityType/:entityId", srmH.Project.ListEntityActivityLogs)

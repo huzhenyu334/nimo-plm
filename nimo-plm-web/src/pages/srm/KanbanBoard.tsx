@@ -24,12 +24,15 @@ import {
 import { ReloadOutlined, AppstoreOutlined } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { srmApi, SRMProject, PRItem, PurchaseRequest, ActivityLog, Supplier } from '@/api/srm';
+import { srmApi, SRMProject, PRItem, PurchaseRequest, ActivityLog, Supplier, SamplingRequest } from '@/api/srm';
+import { Input } from 'antd';
 import dayjs from 'dayjs';
 
 // Kanban column definitions
 const KANBAN_COLUMNS = [
   { key: 'pending', label: '寻源中', color: '#d9d9d9' },
+  { key: 'sampling', label: '打样中', color: '#eb2f96' },
+  { key: 'quoting', label: '报价中', color: '#faad14' },
   { key: 'sourcing', label: '待下单', color: '#13c2c2' },
   { key: 'ordered', label: '已下单', color: '#1890ff' },
   { key: 'shipped', label: '已发货', color: '#722ed1' },
@@ -77,14 +80,19 @@ interface PassiveGroup {
 type ColumnEntry = { type: 'single'; item: KanbanItem } | PassiveGroup;
 
 const itemStatusLabels: Record<string, string> = {
-  pending: '寻源中', sourcing: '待下单', ordered: '已下单', shipped: '已发货',
-  received: '已收货', inspecting: '检验中', passed: '已通过', failed: '未通过',
+  pending: '寻源中', sampling: '打样中', quoting: '报价中', sourcing: '待下单',
+  ordered: '已下单', shipped: '已发货', received: '已收货', inspecting: '检验中',
+  passed: '已通过', failed: '未通过',
 };
 
 // Action definitions per status
-const STATUS_ACTIONS: Record<string, Array<{ label: string; toStatus: string; danger?: boolean; primary?: boolean }>> = {
+const STATUS_ACTIONS: Record<string, Array<{ label: string; toStatus: string; danger?: boolean; primary?: boolean; special?: string }>> = {
   pending: [
-    { label: '发起询价', toStatus: 'sourcing', primary: true },
+    { label: '发起打样', toStatus: 'sampling', primary: true, special: 'sampling' },
+    { label: '发起询价', toStatus: 'sourcing' },
+  ],
+  quoting: [
+    { label: '确认报价', toStatus: 'sourcing', primary: true },
   ],
   sourcing: [
     { label: '确认下单', toStatus: 'ordered', primary: true },
@@ -121,6 +129,10 @@ const KanbanBoard: React.FC = () => {
   const [batchStatusModal, setBatchStatusModal] = useState(false);
   const [batchAssignForm] = Form.useForm();
   const [batchTargetStatus, setBatchTargetStatus] = useState('');
+
+  // Sampling state
+  const [samplingModalItem, setSamplingModalItem] = useState<KanbanItem | null>(null);
+  const [samplingForm] = Form.useForm();
 
   // Load SRM projects for selector
   const { data: projectsData, isLoading: projectsLoading } = useQuery({
@@ -249,6 +261,13 @@ const KanbanBoard: React.FC = () => {
     enabled: !!drawerItem?.id,
   });
 
+  // Sampling records for drawer
+  const { data: samplingData } = useQuery({
+    queryKey: ['srm-sampling', drawerItem?.id],
+    queryFn: () => srmApi.listSampling(drawerItem!.id),
+    enabled: !!drawerItem?.id,
+  });
+
   const handleProjectChange = (value: string) => {
     setSearchParams({ project: value });
   };
@@ -258,6 +277,7 @@ const KanbanBoard: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['srm-project'] });
     if (drawerItem) {
       queryClient.invalidateQueries({ queryKey: ['srm-activities', 'pr_item', drawerItem.id] });
+      queryClient.invalidateQueries({ queryKey: ['srm-sampling', drawerItem.id] });
     }
   };
 
@@ -348,6 +368,44 @@ const KanbanBoard: React.FC = () => {
     }
   };
 
+  // Create sampling request
+  const handleCreateSampling = async () => {
+    if (!samplingModalItem) return;
+    try {
+      const values = await samplingForm.validateFields();
+      setActionLoading(true);
+      await srmApi.createSampling(samplingModalItem.id, {
+        supplier_id: values.supplier_id,
+        sample_qty: values.sample_qty,
+        notes: values.notes,
+      });
+      message.success('打样请求已创建');
+      setSamplingModalItem(null);
+      samplingForm.resetFields();
+      setDrawerItem(null);
+      refreshKanban();
+    } catch {
+      message.error('创建打样失败');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Update sampling status
+  const handleUpdateSamplingStatus = async (samplingId: string, status: string) => {
+    setActionLoading(true);
+    try {
+      await srmApi.updateSamplingStatus(samplingId, status);
+      message.success('打样状态已更新');
+      refreshKanban();
+      queryClient.invalidateQueries({ queryKey: ['srm-sampling'] });
+    } catch {
+      message.error('更新打样状态失败');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const projects = projectsData?.items || [];
   const isLoading = projectsLoading || prLoading;
 
@@ -370,7 +428,17 @@ const KanbanBoard: React.FC = () => {
           </Button>
         )}
         {actions.map((action) =>
-          action.danger ? (
+          action.special === 'sampling' ? (
+            <Button
+              key={action.toStatus}
+              size={size}
+              type="link"
+              style={{ padding: '0 4px', fontSize: size === 'small' ? 12 : 13, height: 'auto', color: '#eb2f96' }}
+              onClick={(e) => { e.stopPropagation(); setSamplingModalItem(item); }}
+            >
+              {action.label}
+            </Button>
+          ) : action.danger ? (
             <Popconfirm
               key={action.toStatus}
               title="确认操作"
@@ -617,6 +685,68 @@ const KanbanBoard: React.FC = () => {
               </>
             )}
 
+            {/* Sampling records */}
+            {(samplingData || []).length > 0 && (
+              <>
+                <Divider style={{ margin: '16px 0 12px' }} />
+                <h4 style={{ marginBottom: 12 }}>打样记录</h4>
+                {(samplingData || []).map((sr: SamplingRequest) => (
+                  <Card key={sr.id} size="small" style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>R{sr.round}</span>
+                      <Tag color={
+                        sr.status === 'passed' ? 'green' :
+                        sr.status === 'failed' ? 'red' :
+                        sr.status === 'verifying' ? 'orange' :
+                        sr.status === 'arrived' ? 'blue' :
+                        sr.status === 'shipping' ? 'purple' : 'default'
+                      }>
+                        {sr.status === 'preparing' ? '制样中' :
+                         sr.status === 'shipping' ? '运输中' :
+                         sr.status === 'arrived' ? '已到货' :
+                         sr.status === 'verifying' ? '验证中' :
+                         sr.status === 'passed' ? '已通过' :
+                         sr.status === 'failed' ? '不通过' : sr.status}
+                      </Tag>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#666' }}>
+                      供应商: {sr.supplier_name || '-'} | 样品数: {sr.sample_qty}
+                    </div>
+                    {sr.notes && <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{sr.notes}</div>}
+                    {sr.verify_result && (
+                      <div style={{ fontSize: 12, marginTop: 2 }}>
+                        验证结果: <Tag color={sr.verify_result === 'passed' ? 'green' : 'red'} style={{ fontSize: 11 }}>
+                          {sr.verify_result === 'passed' ? '通过' : '不通过'}
+                        </Tag>
+                        {sr.reject_reason && <span style={{ color: '#999' }}>{sr.reject_reason}</span>}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 11, color: '#bbb', marginTop: 4 }}>
+                      {dayjs(sr.created_at).format('YYYY-MM-DD HH:mm')}
+                    </div>
+                    {/* Sampling status action buttons */}
+                    {(sr.status === 'preparing' || sr.status === 'shipping') && (
+                      <div style={{ marginTop: 6, borderTop: '1px solid #f0f0f0', paddingTop: 6 }}>
+                        {sr.status === 'preparing' && (
+                          <Button size="small" type="link" loading={actionLoading}
+                            onClick={() => handleUpdateSamplingStatus(sr.id, 'shipping')}>
+                            标记发货
+                          </Button>
+                        )}
+                        {sr.status === 'shipping' && (
+                          <Button size="small" type="link" loading={actionLoading}
+                            onClick={() => handleUpdateSamplingStatus(sr.id, 'arrived')}>
+                            确认到货
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </Card>
+                ))}
+              </>
+            )}
+
+            <Divider style={{ margin: '16px 0 12px' }} />
             <h4 style={{ marginBottom: 12 }}>操作记录</h4>
             {(activityData?.items || []).length === 0 ? (
               <Empty description="暂无操作记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -803,6 +933,51 @@ const KanbanBoard: React.FC = () => {
           确定要将选中的 <strong>{selectedPassiveIds.length}</strong> 颗被动元件状态变更为
           「<strong>{itemStatusLabels[batchTargetStatus] || batchTargetStatus}</strong>」吗？
         </p>
+      </Modal>
+
+      {/* Sampling Modal */}
+      <Modal
+        title="发起打样"
+        open={!!samplingModalItem}
+        onCancel={() => { setSamplingModalItem(null); samplingForm.resetFields(); }}
+        onOk={handleCreateSampling}
+        confirmLoading={actionLoading}
+        okText="确认发起"
+        cancelText="取消"
+        destroyOnClose
+      >
+        {samplingModalItem && (
+          <div style={{ marginBottom: 16, color: '#666', fontSize: 13 }}>
+            物料: <strong>{samplingModalItem.material_name}</strong> ({samplingModalItem.material_code || '-'})
+          </div>
+        )}
+        <Form form={samplingForm} layout="vertical">
+          <Form.Item
+            name="supplier_id"
+            label="供应商"
+            rules={[{ required: true, message: '请选择供应商' }]}
+          >
+            <Select
+              placeholder="请选择供应商"
+              showSearch
+              optionFilterProp="label"
+              options={supplierList.map((s) => ({
+                value: s.id,
+                label: `${s.code} - ${s.name}`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="sample_qty"
+            label="样品数量"
+            rules={[{ required: true, message: '请输入样品数量' }]}
+          >
+            <InputNumber style={{ width: '100%' }} min={1} placeholder="请输入样品数量" />
+          </Form.Item>
+          <Form.Item name="notes" label="备注">
+            <Input.TextArea rows={2} placeholder="备注信息" />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

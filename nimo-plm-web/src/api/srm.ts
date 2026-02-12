@@ -162,6 +162,26 @@ export interface Inspection {
   notes: string;
 }
 
+export interface SamplingRequest {
+  id: string;
+  pr_item_id: string;
+  round: number;
+  supplier_id: string;
+  supplier_name: string;
+  sample_qty: number;
+  status: string; // preparing/shipping/arrived/verifying/passed/failed
+  requested_by: string;
+  arrived_at?: string;
+  verified_by: string;
+  verified_at?: string;
+  verify_result: string;
+  reject_reason: string;
+  approval_id: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SamplingProgress {
   project_id: string;
   total_items: number;
@@ -417,6 +437,34 @@ export const srmApi = {
 
   updatePRItemStatus: async (itemId: string, status: string): Promise<PRItem> => {
     const response = await apiClient.put<ApiResponse<PRItem>>(`/srm/pr-items/${itemId}/status`, { status });
+    return response.data.data;
+  },
+
+  // --- Sampling (打样) ---
+  createSampling: async (itemId: string, data: {
+    supplier_id: string;
+    sample_qty: number;
+    notes?: string;
+  }): Promise<SamplingRequest> => {
+    const response = await apiClient.post<ApiResponse<SamplingRequest>>(`/srm/pr-items/${itemId}/sampling`, data);
+    return response.data.data;
+  },
+
+  listSampling: async (itemId: string): Promise<SamplingRequest[]> => {
+    const response = await apiClient.get<ApiResponse<{ items: SamplingRequest[] }>>(`/srm/pr-items/${itemId}/sampling`);
+    return response.data.data.items;
+  },
+
+  updateSamplingStatus: async (samplingId: string, status: string): Promise<SamplingRequest> => {
+    const response = await apiClient.put<ApiResponse<SamplingRequest>>(`/srm/sampling/${samplingId}/status`, { status });
+    return response.data.data;
+  },
+
+  requestSamplingVerify: async (samplingId: string, data: {
+    approver_open_id: string;
+    initiator_open_id: string;
+  }): Promise<SamplingRequest> => {
+    const response = await apiClient.post<ApiResponse<SamplingRequest>>(`/srm/sampling/${samplingId}/request-verify`, data);
     return response.data.data;
   },
 

@@ -82,6 +82,7 @@ func (r *TaskRepository) ListByProject(ctx context.Context, projectID string, fi
 
 	err := query.
 		Preload("Assignee").
+		Preload("Creator").
 		Order("level ASC, sequence ASC").
 		Find(&tasks).Error
 
@@ -329,6 +330,7 @@ func (r *TaskRepository) ListByAssigneeWithPaging(ctx context.Context, userID st
 	err := query.
 		Preload("Project").
 		Preload("Assignee").
+		Preload("Creator").
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(pageSize).

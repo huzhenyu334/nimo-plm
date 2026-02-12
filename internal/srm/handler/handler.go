@@ -21,6 +21,7 @@ type Handlers struct {
 	Equipment        *EquipmentHandler
 	RFQ              *RFQHandler
 	PRItem           *PRItemHandler
+	Sampling         *SamplingHandler
 }
 
 // NewHandlers 创建SRM处理器集合
@@ -37,6 +38,7 @@ func NewHandlers(
 	equipmentSvc *service.EquipmentService,
 	rfqSvc *service.RFQService,
 	prItemSvc *service.PRItemService,
+	samplingSvc *service.SamplingService,
 ) *Handlers {
 	return &Handlers{
 		Supplier:         NewSupplierHandler(supplierSvc),
@@ -51,6 +53,7 @@ func NewHandlers(
 		Equipment:        NewEquipmentHandler(equipmentSvc),
 		RFQ:              NewRFQHandler(rfqSvc),
 		PRItem:           NewPRItemHandler(prItemSvc),
+		Sampling:         NewSamplingHandler(samplingSvc),
 	}
 }
 
