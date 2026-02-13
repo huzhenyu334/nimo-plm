@@ -30,6 +30,22 @@
 7. **目标是又快又好**：5分钟能搞定的bug不要花20分钟
 8. **大文件用行号范围读取**：超过500行的文件，用offset+limit只读需要的部分
 
+## 验证报告（每次任务完成前必须输出）
+任务完成后、部署前，输出标准验证报告：
+```
+VERIFICATION REPORT
+==================
+Build:     [PASS/FAIL]  — go build + npm run build
+Types:     [PASS/FAIL]  — tsc --noEmit (前端) / go vet (后端)
+Tests:     [PASS/FAIL]  — go test + npx playwright test (X/Y passed)
+Deploy:    [PASS/FAIL]  — 服务重启 + HTTP 200
+Changed:   X files (+Y -Z lines)
+
+Overall:   [READY/NOT READY]
+Issues:    (如有未解决的问题列在这里)
+```
+如果任何项FAIL，必须修复后重新验证，不能带着FAIL部署。
+
 ## 前端改动必须写UI测试（强制规则）
 每次修改或新增前端功能，必须同时在 e2e/ 目录下新增或更新对应的Playwright UI测试：
 1. **新功能** → 写新的 .spec.ts 文件，用浏览器打开页面验证UI元素存在、可交互
