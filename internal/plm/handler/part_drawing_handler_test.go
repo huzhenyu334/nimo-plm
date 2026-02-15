@@ -40,8 +40,8 @@ func seedBOMAndItem(t *testing.T, db *gorm.DB, userID string) (*entity.ProjectBO
 	db.Create(project)
 
 	bom := &entity.ProjectBOM{
-		ID: "bom-draw-001", ProjectID: "proj-draw-001", BOMType: "SBOM",
-		Name: "Test SBOM", Version: "v1.0", Status: "draft", CreatedBy: userID,
+		ID: "bom-draw-001", ProjectID: "proj-draw-001", BOMType: "PBOM",
+		Name: "Test PBOM", Version: "v1.0", Status: "draft", CreatedBy: userID,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
 	db.Create(bom)

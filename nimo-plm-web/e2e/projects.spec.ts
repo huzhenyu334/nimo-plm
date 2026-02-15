@@ -14,14 +14,14 @@ test.describe('Project Management', () => {
     await expect(page.getByRole('heading', { name: '研发项目' })).toBeVisible();
   });
 
-  test('project list shows table columns', async ({ page }) => {
+  test('project list shows card layout with search and create', async ({ page }) => {
     await page.goto('/projects');
     await page.waitForLoadState('networkidle');
 
-    // Verify table column headers are visible
-    await expect(page.getByRole('columnheader', { name: '项目编码' })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: '项目名称' })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: '操作' })).toBeVisible();
+    // Verify search input exists
+    await expect(page.getByPlaceholder('搜索项目名称或编号')).toBeVisible();
+    // Verify create button exists
+    await expect(page.getByRole('button', { name: '创建项目' })).toBeVisible();
   });
 
   test('create project button navigates to templates', async ({ page }) => {
@@ -29,20 +29,20 @@ test.describe('Project Management', () => {
     await page.waitForLoadState('networkidle');
 
     // Click the create button which navigates to templates
-    await page.getByRole('button', { name: '从研发流程创建项目' }).click();
+    await page.getByRole('button', { name: '创建项目' }).click();
 
     // Should navigate to templates page
     await expect(page).toHaveURL(/\/templates/);
   });
 
-  test('view project detail', async ({ page }) => {
+  test('click project card navigates to detail', async ({ page }) => {
     await page.goto('/projects');
     await page.waitForLoadState('networkidle');
 
-    // Click "详情" link on the first project row
-    const detailLink = page.getByRole('button', { name: '详情' }).first();
-    if (await detailLink.isVisible()) {
-      await detailLink.click();
+    // Click the first project card (if any exist)
+    const card = page.locator('.ant-card-hoverable').first();
+    if (await card.isVisible()) {
+      await card.click();
       // Should navigate to detail page
       await expect(page).toHaveURL(/\/projects\/.+/);
     }

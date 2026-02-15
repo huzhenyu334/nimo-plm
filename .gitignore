@@ -27,3 +27,4 @@ Thumbs.db
 # Node modules
 node_modules/
 nimo-prd/
+.claude-code-reports/

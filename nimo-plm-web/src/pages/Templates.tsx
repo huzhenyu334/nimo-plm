@@ -25,12 +25,15 @@ import {
   SendOutlined,
   DeleteOutlined,
   RollbackOutlined,
+  SearchOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import { templateApi, ProjectTemplate } from '@/api/templates';
 import { codenameApi, Codename } from '@/api/codenames';
 import UserSelect from '@/components/UserSelect';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Title, Text } = Typography;
@@ -48,6 +51,7 @@ const Templates: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { message, modal } = App.useApp();
+  const isMobile = useIsMobile();
   const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate | null>(null);
   const [createProjectModalOpen, setCreateProjectModalOpen] = useState(false);
   const [createTemplateModalOpen, setCreateTemplateModalOpen] = useState(false);
@@ -475,34 +479,8 @@ const Templates: React.FC = () => {
 
   const isPlatformType = getCodenameType(selectedTemplate) === 'platform';
 
-  return (
-    <div style={{ padding: 24 }}>
-      <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <Space size="middle" align="center">
-            <Title level={4} style={{ margin: 0 }}>
-              研发流程管理
-            </Title>
-          </Space>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setCreateTemplateModalOpen(true)}
-          >
-            新建模板
-          </Button>
-        </div>
-
-        <Table
-          columns={columns}
-          dataSource={displayedTemplates}
-          rowKey="id"
-          loading={isLoading}
-          pagination={false}
-          scroll={{ x: 1500 }}
-        />
-      </Card>
-
+  const modals = (
+    <>
       {/* 新建模板弹窗 */}
       <Modal
         title="新建流程模板"
@@ -614,6 +592,122 @@ const Templates: React.FC = () => {
           </Text>
         </div>
       </Modal>
+    </>
+  );
+
+  // Mobile card view
+  if (isMobile) {
+    return (
+      <div style={{ padding: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <Title level={5} style={{ margin: 0 }}>研发流程管理</Title>
+        </div>
+
+        {isLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <Spin />
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {displayedTemplates.map((record) => (
+              <Card
+                key={record.id}
+                size="small"
+                style={{ cursor: 'pointer' }}
+                onClick={() => navigate(`/templates/${record.id}`)}
+                bodyStyle={{ padding: 12 }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Text code style={{ fontSize: 11 }}>{record.code}</Text>
+                    <div style={{ marginTop: 4 }}>
+                      <Text strong>
+                        {record.name} {record.version ? `v${record.version}` : ''}
+                      </Text>
+                    </div>
+                    <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                      <Tag
+                        color={record.status === 'published' ? 'green' : 'orange'}
+                        style={{ margin: 0 }}
+                      >
+                        {record.status === 'published' ? '已发布' : '草稿'}
+                      </Tag>
+                      {record.product_type && (
+                        <Tag style={{ margin: 0 }}>{record.product_type}</Tag>
+                      )}
+                    </div>
+                    <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {record.phases?.map((phase) => (
+                        <Tag key={phase} color={phaseColors[phase]} style={{ margin: 0, fontSize: 11 }}>
+                          {phase}
+                        </Tag>
+                      ))}
+                    </div>
+                    {record.estimated_days != null && (
+                      <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+                        预估工期: {record.estimated_days}天
+                      </Text>
+                    )}
+                  </div>
+                  <RightOutlined style={{ color: '#bbb', marginTop: 4, flexShrink: 0 }} />
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {/* FAB for create template */}
+        <Button
+          type="primary"
+          shape="circle"
+          icon={<PlusOutlined />}
+          size="large"
+          onClick={() => setCreateTemplateModalOpen(true)}
+          style={{
+            position: 'fixed',
+            right: 20,
+            bottom: 20,
+            width: 52,
+            height: 52,
+            zIndex: 100,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+          }}
+        />
+
+        {modals}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: 24 }}>
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Space size="middle" align="center">
+            <Title level={4} style={{ margin: 0 }}>
+              研发流程管理
+            </Title>
+          </Space>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => setCreateTemplateModalOpen(true)}
+          >
+            新建模板
+          </Button>
+        </div>
+
+        <Table
+          columns={columns}
+          dataSource={displayedTemplates}
+          rowKey="id"
+          loading={isLoading}
+          pagination={false}
+          scroll={{ x: 1500 }}
+        />
+      </Card>
+
+      {modals}
     </div>
   );
 };

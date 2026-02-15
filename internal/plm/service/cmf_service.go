@@ -22,10 +22,10 @@ func NewCMFService(cmfRepo *repository.CMFRepository, bomRepo *repository.Projec
 }
 
 // GetAppearanceParts 获取外观件列表
-// 查找项目的SBOM，过滤 is_appearance_part=true 的行项
+// 查找项目的PBOM，过滤 is_appearance_part=true 的行项
 func (s *CMFService) GetAppearanceParts(ctx context.Context, projectID, taskID string) ([]entity.ProjectBOMItem, error) {
-	// 查找项目的SBOM（可能有多个，取最新的published或draft）
-	boms, err := s.bomRepo.ListByProject(ctx, projectID, "SBOM", "")
+	// 查找项目的PBOM（可能有多个，取最新的published或draft）
+	boms, err := s.bomRepo.ListByProject(ctx, projectID, "PBOM", "")
 	if err != nil {
 		return nil, fmt.Errorf("查询SBOM失败: %w", err)
 	}
@@ -33,7 +33,7 @@ func (s *CMFService) GetAppearanceParts(ctx context.Context, projectID, taskID s
 		return []entity.ProjectBOMItem{}, nil
 	}
 
-	// 优先选published的SBOM，否则用第一个
+	// 优先选published的PBOM，否则用第一个
 	var targetBOM *entity.ProjectBOM
 	for i := range boms {
 		if boms[i].Status == "published" {
@@ -54,7 +54,7 @@ func (s *CMFService) GetAppearanceParts(ctx context.Context, projectID, taskID s
 	// 过滤外观件（排除CMF衍生零件）
 	var parts []entity.ProjectBOMItem
 	for _, item := range items {
-		if item.IsAppearancePart && !item.IsVariant {
+		if getExtAttrBool(item.ExtendedAttrs, "is_appearance_part") && !getExtAttrBool(item.ExtendedAttrs, "is_variant") {
 			parts = append(parts, item)
 		}
 	}

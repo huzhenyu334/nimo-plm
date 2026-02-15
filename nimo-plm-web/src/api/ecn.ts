@@ -12,6 +12,11 @@ export interface ECN {
   reason: string;
   description: string;
   impact_analysis: string;
+  technical_plan: string;
+  planned_date: string;
+  completion_rate: number;
+  approval_mode: string;
+  sop_impact: Record<string, any>;
   requested_by: string;
   requested_at: string;
   approved_by: string;
@@ -29,6 +34,7 @@ export interface ECN {
   implementer?: User;
   affected_items?: ECNAffectedItem[];
   approvals?: ECNApproval[];
+  tasks?: ECNTask[];
 }
 
 export interface ECNAffectedItem {
@@ -36,6 +42,9 @@ export interface ECNAffectedItem {
   ecn_id: string;
   item_type: string;
   item_id: string;
+  material_code: string;
+  material_name: string;
+  affected_bom_ids: Record<string, any>;
   before_value: Record<string, any>;
   after_value: Record<string, any>;
   change_description: string;
@@ -48,9 +57,46 @@ export interface ECNApproval {
   approver_id: string;
   sequence: number;
   status: string;
+  decision: string;
   comment: string;
-  approved_at: string;
+  decided_at: string;
+  created_at: string;
   approver?: User;
+}
+
+export interface ECNTask {
+  id: string;
+  ecn_id: string;
+  type: string;
+  title: string;
+  description: string;
+  assignee_id: string;
+  due_date: string;
+  status: string;
+  completed_at: string;
+  completed_by: string;
+  metadata: Record<string, any>;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  assignee?: User;
+}
+
+export interface ECNHistory {
+  id: string;
+  ecn_id: string;
+  action: string;
+  user_id: string;
+  detail: Record<string, any>;
+  created_at: string;
+  user?: User;
+}
+
+export interface ECNStats {
+  pending_approval: number;
+  executing: number;
+  month_created: number;
+  month_closed: number;
 }
 
 export interface ECNListResponse {
@@ -69,15 +115,22 @@ export interface CreateECNRequest {
   reason: string;
   description?: string;
   impact_analysis?: string;
+  technical_plan?: string;
+  planned_date?: string;
+  approval_mode?: string;
+  sop_impact?: Record<string, any>;
   affected_items?: Partial<ECNAffectedItem>[];
   approver_ids?: string[];
 }
 
 export const ecnApi = {
-  list: async (params?: { status?: string; product_id?: string; page?: number; page_size?: number }): Promise<ECNListResponse> => {
+  list: async (params?: { status?: string; product_id?: string; keyword?: string; change_type?: string; urgency?: string; page?: number; page_size?: number }): Promise<ECNListResponse> => {
     const searchParams = new URLSearchParams();
     if (params?.status) searchParams.set('status', params.status);
     if (params?.product_id) searchParams.set('product_id', params.product_id);
+    if (params?.keyword) searchParams.set('keyword', params.keyword);
+    if (params?.change_type) searchParams.set('change_type', params.change_type);
+    if (params?.urgency) searchParams.set('urgency', params.urgency);
     if (params?.page) searchParams.set('page', params.page.toString());
     if (params?.page_size) searchParams.set('page_size', params.page_size.toString());
     const query = searchParams.toString();
@@ -110,7 +163,7 @@ export const ecnApi = {
     return response.data.data;
   },
 
-  reject: async (id: string, data: { comment: string }): Promise<ECN> => {
+  reject: async (id: string, data: { reason: string }): Promise<ECN> => {
     const response = await apiClient.post<ApiResponse<ECN>>(`/ecns/${id}/reject`, data);
     return response.data.data;
   },
@@ -120,8 +173,20 @@ export const ecnApi = {
     return response.data.data;
   },
 
-  listAffectedItems: async (id: string): Promise<{ items: ECNAffectedItem[] }> => {
-    const response = await apiClient.get<ApiResponse<{ items: ECNAffectedItem[] }>>(`/ecns/${id}/affected-items`);
+  // 统计
+  getStats: async (): Promise<ECNStats> => {
+    const response = await apiClient.get<ApiResponse<ECNStats>>('/ecns/stats');
+    return response.data.data;
+  },
+
+  getMyPending: async (): Promise<{ items: ECN[] }> => {
+    const response = await apiClient.get<ApiResponse<{ items: ECN[] }>>('/ecns/my-pending');
+    return response.data.data;
+  },
+
+  // 受影响项
+  listAffectedItems: async (id: string): Promise<ECNAffectedItem[]> => {
+    const response = await apiClient.get<ApiResponse<ECNAffectedItem[]>>(`/ecns/${id}/affected-items`);
     return response.data.data;
   },
 
@@ -130,17 +195,50 @@ export const ecnApi = {
     return response.data.data;
   },
 
+  updateAffectedItem: async (id: string, itemId: string, data: Partial<ECNAffectedItem>): Promise<ECNAffectedItem> => {
+    const response = await apiClient.put<ApiResponse<ECNAffectedItem>>(`/ecns/${id}/affected-items/${itemId}`, data);
+    return response.data.data;
+  },
+
   removeAffectedItem: async (id: string, itemId: string): Promise<void> => {
     await apiClient.delete(`/ecns/${id}/affected-items/${itemId}`);
   },
 
-  listApprovals: async (id: string): Promise<{ approvals: ECNApproval[] }> => {
-    const response = await apiClient.get<ApiResponse<{ approvals: ECNApproval[] }>>(`/ecns/${id}/approvals`);
+  // 审批
+  listApprovals: async (id: string): Promise<ECNApproval[]> => {
+    const response = await apiClient.get<ApiResponse<ECNApproval[]>>(`/ecns/${id}/approvals`);
     return response.data.data;
   },
 
   addApprover: async (id: string, data: { approver_id: string; sequence?: number }): Promise<ECNApproval> => {
     const response = await apiClient.post<ApiResponse<ECNApproval>>(`/ecns/${id}/approvers`, data);
+    return response.data.data;
+  },
+
+  // 执行任务
+  listTasks: async (id: string): Promise<{ items: ECNTask[] }> => {
+    const response = await apiClient.get<ApiResponse<{ items: ECNTask[] }>>(`/ecns/${id}/tasks`);
+    return response.data.data;
+  },
+
+  createTask: async (id: string, data: Partial<ECNTask>): Promise<ECNTask> => {
+    const response = await apiClient.post<ApiResponse<ECNTask>>(`/ecns/${id}/tasks`, data);
+    return response.data.data;
+  },
+
+  updateTask: async (id: string, taskId: string, data: Partial<ECNTask>): Promise<ECNTask> => {
+    const response = await apiClient.put<ApiResponse<ECNTask>>(`/ecns/${id}/tasks/${taskId}`, data);
+    return response.data.data;
+  },
+
+  // BOM变更应用
+  applyBOMChanges: async (id: string): Promise<void> => {
+    await apiClient.post(`/ecns/${id}/apply-bom-changes`, {});
+  },
+
+  // 操作历史
+  listHistory: async (id: string): Promise<{ items: ECNHistory[] }> => {
+    const response = await apiClient.get<ApiResponse<{ items: ECNHistory[] }>>(`/ecns/${id}/history`);
     return response.data.data;
   },
 };

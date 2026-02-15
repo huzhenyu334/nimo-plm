@@ -411,7 +411,7 @@ const CMFVariantEditor: React.FC<CMFVariantEditorProps> = ({ projectId, mode = '
   }
 
   if (parts.length === 0) {
-    return <Empty description="暂无外观件。请在结构BOM中标记外观件 (is_appearance_part)" />;
+    return <Empty description="暂无外观件。请在EBOM中标记外观件 (is_appearance_part)" />;
   }
 
   const collapseItems = parts.map((part: AppearancePartWithCMF) => {
@@ -427,7 +427,7 @@ const CMFVariantEditor: React.FC<CMFVariantEditorProps> = ({ projectId, mode = '
               style={{ objectFit: 'contain', borderRadius: 3, background: '#f5f5f5' }} />
           )}
           <Text strong style={{ fontSize: 13 }}>#{item.item_number} {item.name}</Text>
-          {item.material_type && <Tag style={{ fontSize: 11 }}>{item.material_type}</Tag>}
+          {item.extended_attrs?.material_type && <Tag style={{ fontSize: 11 }}>{item.extended_attrs.material_type}</Tag>}
           <Tag color="blue" style={{ fontSize: 11 }}>{variants.length} 方案</Tag>
         </Space>
       ),

@@ -221,7 +221,7 @@ const PBOMEditableTable: React.FC<PBOMEditableTableProps> = ({
       )}
 
       {items.length === 0 && !isEdit ? (
-        <Empty description="暂无包装BOM数据" />
+        <Empty description="暂无工艺BOM(PBOM)数据" />
       ) : (
         <Table
           columns={columns}

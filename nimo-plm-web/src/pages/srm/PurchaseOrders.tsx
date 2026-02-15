@@ -15,11 +15,13 @@ import {
   Drawer,
   Descriptions,
   Popconfirm,
+  Spin,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, MinusCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, MinusCircleOutlined, SearchOutlined, RightOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { srmApi, PurchaseOrder, POItem } from '@/api/srm';
 import dayjs from 'dayjs';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 const { Search } = Input;
 
@@ -39,6 +41,7 @@ const statusColors: Record<string, string> = {
 
 const PurchaseOrders: React.FC = () => {
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
   const [searchText, setSearchText] = useState('');
   const [filterType, setFilterType] = useState<string>();
   const [filterStatus, setFilterStatus] = useState<string>();
@@ -225,71 +228,11 @@ const PurchaseOrders: React.FC = () => {
   ];
 
   const detail = poDetail || currentPO;
+  const orders = data?.items || [];
 
-  return (
-    <div>
-      <Card
-        title="采购订单"
-        extra={
-          <Space wrap>
-            <Select
-              placeholder="类型"
-              allowClear
-              style={{ width: 100 }}
-              options={[{ value: 'sample', label: '打样' }, { value: 'production', label: '量产' }]}
-              value={filterType}
-              onChange={(v) => { setFilterType(v); setPage(1); }}
-            />
-            <Select
-              placeholder="状态"
-              allowClear
-              style={{ width: 110 }}
-              options={Object.entries(statusLabels).map(([k, v]) => ({ value: k, label: v }))}
-              value={filterStatus}
-              onChange={(v) => { setFilterStatus(v); setPage(1); }}
-            />
-            <Search
-              placeholder="搜索"
-              allowClear
-              style={{ width: 180 }}
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              onSearch={() => setPage(1)}
-            />
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => queryClient.invalidateQueries({ queryKey: ['srm-pos'] })}
-            >
-              刷新
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalVisible(true)}>
-              新建订单
-            </Button>
-          </Space>
-        }
-      >
-        <Table
-          columns={columns}
-          dataSource={data?.items || []}
-          rowKey="id"
-          loading={isLoading}
-          scroll={{ x: 800 }}
-          pagination={{
-            current: page,
-            pageSize,
-            total: data?.pagination?.total || 0,
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total) => `共 ${total} 条`,
-            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
-          }}
-          onRow={(record) => ({
-            onClick: () => { setCurrentPO(record); setDrawerVisible(true); },
-            style: { cursor: 'pointer' },
-          })}
-        />
-      </Card>
-
+  // ========== Shared Modals/Drawers ==========
+  const modalsAndDrawers = (
+    <>
       {/* 新建订单 */}
       <Modal
         title="新建采购订单"
@@ -356,11 +299,11 @@ const PurchaseOrders: React.FC = () => {
         title={detail?.po_code || '采购订单详情'}
         open={drawerVisible}
         onClose={() => { setDrawerVisible(false); setCurrentPO(null); }}
-        width={760}
+        width={isMobile ? '100%' : 760}
       >
         {detail && (
           <>
-            <Descriptions column={2} bordered size="small" style={{ marginBottom: 24 }}>
+            <Descriptions column={isMobile ? 1 : 2} bordered size="small" style={{ marginBottom: 24 }}>
               <Descriptions.Item label="PO编码">{detail.po_code}</Descriptions.Item>
               <Descriptions.Item label="供应商">{detail.supplier?.name || '-'}</Descriptions.Item>
               <Descriptions.Item label="类型">
@@ -377,7 +320,7 @@ const PurchaseOrders: React.FC = () => {
               </Descriptions.Item>
               <Descriptions.Item label="付款条件">{detail.payment_terms || '-'}</Descriptions.Item>
               <Descriptions.Item label="创建时间">{dayjs(detail.created_at).format('YYYY-MM-DD')}</Descriptions.Item>
-              <Descriptions.Item label="备注" span={2}>{detail.notes || '-'}</Descriptions.Item>
+              <Descriptions.Item label="备注" span={isMobile ? 1 : 2}>{detail.notes || '-'}</Descriptions.Item>
             </Descriptions>
             <h4>订单明细</h4>
             <Table
@@ -391,6 +334,141 @@ const PurchaseOrders: React.FC = () => {
           </>
         )}
       </Drawer>
+    </>
+  );
+
+  // ========== Mobile Layout ==========
+  if (isMobile) {
+    return (
+      <div style={{ background: '#f5f5f5', minHeight: '100vh' }}>
+        <div style={{ padding: '12px 16px', background: '#fff', position: 'sticky', top: 0, zIndex: 10 }}>
+          <Input
+            placeholder="搜索PO编码/供应商"
+            prefix={<SearchOutlined style={{ color: '#bbb' }} />}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            onPressEnter={() => setPage(1)}
+            allowClear
+            style={{ borderRadius: 20 }}
+          />
+        </div>
+        <div className="mobile-filter-pills" style={{ padding: '8px 12px' }}>
+          {[{ label: '全部', value: undefined as string | undefined }, ...Object.entries(statusLabels).map(([k, v]) => ({ label: v, value: k as string | undefined }))].map(opt => (
+            <div
+              key={opt.value || 'all'}
+              className={`mobile-filter-pill ${filterStatus === opt.value ? 'active' : ''}`}
+              onClick={() => { setFilterStatus(opt.value); setPage(1); }}
+            >{opt.label}</div>
+          ))}
+        </div>
+        <div style={{ padding: '0 12px' }}>
+          {isLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="加载中..." /></div>
+          ) : orders.map(record => (
+            <div
+              key={record.id}
+              onClick={() => { setCurrentPO(record); setDrawerVisible(true); }}
+              style={{ background: '#fff', borderRadius: 10, padding: '12px 14px', marginBottom: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.04)', cursor: 'pointer' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontFamily: 'monospace', color: '#1677ff', fontSize: 14, flex: 1 }}>{record.po_code}</span>
+                <Tag color={statusColors[record.status]} style={{ margin: 0 }}>{statusLabels[record.status] || record.status}</Tag>
+              </div>
+              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {record.supplier?.name || '-'}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, color: '#666', gap: 8 }}>
+                <Tag color={typeColors[record.type]} style={{ margin: 0, fontSize: 11 }}>{typeLabels[record.type] || record.type}</Tag>
+                {record.expected_date && (
+                  <span>{dayjs(record.expected_date).format('YYYY-MM-DD')}</span>
+                )}
+                <span style={{ marginLeft: 'auto', fontWeight: 700, color: '#cf1322', fontSize: 14 }}>
+                  {record.total_amount != null ? `¥${record.total_amount.toFixed(2)}` : ''}
+                </span>
+                <RightOutlined style={{ fontSize: 10, color: '#ccc' }} />
+              </div>
+            </div>
+          ))}
+          {orders.length === 0 && !isLoading && (
+            <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>暂无采购订单</div>
+          )}
+        </div>
+        <div
+          onClick={() => setModalVisible(true)}
+          style={{ position: 'fixed', bottom: 80, right: 20, width: 52, height: 52, borderRadius: 26, background: '#1677ff', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(22,119,255,0.4)', zIndex: 100, fontSize: 22, cursor: 'pointer' }}
+        >
+          <PlusOutlined />
+        </div>
+        {modalsAndDrawers}
+      </div>
+    );
+  }
+
+  // ========== Desktop Layout ==========
+  return (
+    <div>
+      <Card
+        title="采购订单"
+        extra={
+          <Space wrap>
+            <Select
+              placeholder="类型"
+              allowClear
+              style={{ width: 100 }}
+              options={[{ value: 'sample', label: '打样' }, { value: 'production', label: '量产' }]}
+              value={filterType}
+              onChange={(v) => { setFilterType(v); setPage(1); }}
+            />
+            <Select
+              placeholder="状态"
+              allowClear
+              style={{ width: 110 }}
+              options={Object.entries(statusLabels).map(([k, v]) => ({ value: k, label: v }))}
+              value={filterStatus}
+              onChange={(v) => { setFilterStatus(v); setPage(1); }}
+            />
+            <Search
+              placeholder="搜索"
+              allowClear
+              style={{ width: 180 }}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              onSearch={() => setPage(1)}
+            />
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['srm-pos'] })}
+            >
+              刷新
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalVisible(true)}>
+              新建订单
+            </Button>
+          </Space>
+        }
+      >
+        <Table
+          columns={columns}
+          dataSource={orders}
+          rowKey="id"
+          loading={isLoading}
+          scroll={{ x: 800 }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: data?.pagination?.total || 0,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total) => `共 ${total} 条`,
+            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
+          }}
+          onRow={(record) => ({
+            onClick: () => { setCurrentPO(record); setDrawerVisible(true); },
+            style: { cursor: 'pointer' },
+          })}
+        />
+      </Card>
+      {modalsAndDrawers}
     </div>
   );
 };

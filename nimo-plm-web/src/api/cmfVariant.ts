@@ -26,10 +26,8 @@ export interface AppearancePartWithCMF {
     id: string;
     name: string;
     item_number: number;
-    material_type?: string;
-    process_type?: string;
     thumbnail_url?: string;
-    is_appearance_part: boolean;
+    extended_attrs?: Record<string, any>;
   };
   cmf_variants: CMFVariant[];
   bom_id: string;

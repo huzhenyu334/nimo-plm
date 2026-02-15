@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import {
   Card,
   Tabs,
@@ -30,6 +32,7 @@ import {
   UserOutlined,
   FileTextOutlined,
   InboxOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import {
   approvalDefinitionApi,
@@ -54,21 +57,32 @@ const statusConfig: Record<string, { color: string; text: string; icon: React.Re
 };
 
 const Approvals: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('submit');
+  const [activeTab, setActiveTab] = useState('center');
+  const navigate = useNavigate();
+  const isMobile = useIsMobile();
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ marginBottom: 24 }}>
-        <Title level={3} style={{ margin: 0 }}>审批中心</Title>
-      </div>
+    <div style={{ padding: isMobile ? 0 : 24 }}>
+      {!isMobile && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <Title level={3} style={{ margin: 0 }}>审批中心</Title>
+          <Button
+            icon={<SettingOutlined />}
+            onClick={() => navigate('/approval-admin')}
+          >
+            审批后台配置
+          </Button>
+        </div>
+      )}
 
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
-        size="large"
+        size={isMobile ? 'middle' : 'large'}
+        style={{ padding: isMobile ? '0 12px' : 0 }}
         items={[
-          { key: 'submit', label: '发起申请' },
           { key: 'center', label: '审批中心' },
+          { key: 'submit', label: '发起申请' },
         ]}
       />
 
@@ -83,6 +97,7 @@ const SubmitTab: React.FC = () => {
   const [searchText, setSearchText] = useState('');
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   const [selectedDef, setSelectedDef] = useState<ApprovalDefinition | null>(null);
+  const isMobileSubmit = useIsMobile();
 
   const { data: defData, isLoading } = useQuery({
     queryKey: ['approval-definitions'],
@@ -122,13 +137,13 @@ const SubmitTab: React.FC = () => {
   };
 
   return (
-    <div>
+    <div style={{ padding: isMobileSubmit ? '0 12px' : 0 }}>
       <Input
         placeholder="搜索审批类型"
         prefix={<SearchOutlined />}
         value={searchText}
         onChange={(e) => setSearchText(e.target.value)}
-        style={{ width: 300, marginBottom: 24 }}
+        style={{ width: isMobileSubmit ? '100%' : 300, marginBottom: 24 }}
         allowClear
       />
 
@@ -388,6 +403,7 @@ const DynamicFormField: React.FC<{ field: FormField }> = ({ field }) => {
 
 const ApprovalCenterTab: React.FC = () => {
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
   const [listType, setListType] = useState('my_pending');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
@@ -447,6 +463,132 @@ const ApprovalCenterTab: React.FC = () => {
 
   const approvalList = Array.isArray(approvals) ? approvals : [];
 
+  // Mobile: full-screen detail view
+  if (isMobile && selectedId) {
+    return (
+      <div className="ds-detail-page">
+        <Button type="link" icon={<ClockCircleOutlined />} onClick={() => setSelectedId(null)} style={{ padding: 0, marginBottom: 8 }}>
+          返回列表
+        </Button>
+        {detailLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        ) : selectedApproval ? (
+          <>
+            <ApprovalDetail
+              approval={selectedApproval}
+              onApprove={handleApprove}
+              onReject={(id: string) => { setSelectedId(id); setRejectModalOpen(true); }}
+              approvePending={approveMutation.isPending}
+            />
+            {/* Mobile fixed action bar for pending approvals */}
+            {selectedApproval.status === 'pending' && (
+              <div className="mobile-approval-actions">
+                <Button
+                  danger
+                  size="large"
+                  onClick={() => { setRejectModalOpen(true); }}
+                >
+                  拒绝
+                </Button>
+                <Button
+                  type="primary"
+                  size="large"
+                  style={{ background: '#52c41a', borderColor: '#52c41a' }}
+                  onClick={() => handleApprove(selectedApproval.id)}
+                  loading={approveMutation.isPending}
+                >
+                  同意
+                </Button>
+              </div>
+            )}
+          </>
+        ) : (
+          <Empty description="无法加载详情" />
+        )}
+        <Modal
+          title="拒绝审批"
+          open={rejectModalOpen}
+          onCancel={() => { setRejectModalOpen(false); setRejectComment(''); }}
+          onOk={() => {
+            if (!rejectComment.trim()) { message.warning('请输入拒绝原因'); return; }
+            if (selectedId) rejectMutation.mutate({ id: selectedId, comment: rejectComment.trim() });
+          }}
+          confirmLoading={rejectMutation.isPending}
+          okText="确认拒绝"
+          okButtonProps={{ danger: true }}
+          cancelText="取消"
+        >
+          <Input.TextArea rows={4} placeholder="请输入拒绝原因..." value={rejectComment} onChange={(e) => setRejectComment(e.target.value)} />
+        </Modal>
+      </div>
+    );
+  }
+
+  // Mobile: list view
+  if (isMobile) {
+    return (
+      <div>
+        {/* Filter pills */}
+        <div className="mobile-filter-pills">
+          {[
+            { key: 'my_pending', label: '待我处理' },
+            { key: 'my_approved', label: '我已处理' },
+            { key: 'my_submitted', label: '我发起的' },
+          ].map((item) => (
+            <div
+              key={item.key}
+              className={`mobile-filter-pill ${listType === item.key ? 'active' : ''}`}
+              onClick={() => { setListType(item.key); setSelectedId(null); }}
+            >
+              {item.label}
+            </div>
+          ))}
+        </div>
+
+        <div className="ds-page-content">
+          {isLoading ? (
+            <div style={{ textAlign: 'center', padding: 60 }}><Spin /></div>
+          ) : approvalList.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 60 }}><Empty description="暂无审批" image={Empty.PRESENTED_IMAGE_SIMPLE} /></div>
+          ) : (
+            approvalList.map((item: ApprovalInstance) => {
+              const statusCfg = statusConfig[item.status];
+              const tagClass = statusCfg?.color === 'processing' ? 'ds-tag-processing' :
+                statusCfg?.color === 'success' ? 'ds-tag-success' :
+                statusCfg?.color === 'error' ? 'ds-tag-danger' : 'ds-tag-default';
+              return (
+                <div
+                  key={item.id}
+                  className="ds-list-card"
+                  onClick={() => setSelectedId(item.id)}
+                >
+                  <div className="ds-card-header">
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="ds-card-title">{item.definition_name || '审批'}</div>
+                    </div>
+                    <span className={`ds-tag ${tagClass}`}>{statusCfg?.text || item.status}</span>
+                  </div>
+                  <div className="ds-card-meta">
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <Avatar size={18} icon={<UserOutlined />} src={item.requester?.avatar_url} style={{ flexShrink: 0 }}>
+                        {item.requester?.name?.[0]}
+                      </Avatar>
+                      {item.requester?.name || '未知'}
+                    </span>
+                    <span style={{ color: 'var(--ds-text-tertiary)' }}>
+                      {item.created_at ? dayjs(item.created_at).format('MM-DD HH:mm') : ''}
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Desktop layout
   return (
     <div style={{ display: 'flex', gap: 16, minHeight: 500 }}>
       {/* Left sidebar */}
@@ -568,6 +710,7 @@ const TaskFormSection: React.FC<{ projectId: string; taskId: string }> = ({ proj
   const [submission, setSubmission] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [userMap, setUserMap] = useState<Record<string, string>>({});
+  const isMobileForm = useIsMobile();
 
   useEffect(() => {
     Promise.all([
@@ -592,35 +735,48 @@ const TaskFormSection: React.FC<{ projectId: string; taskId: string }> = ({ proj
   const fields = formDef.fields || [];
   const data = submission.data || {};
 
+  const formatFieldValue = (field: any) => {
+    let value = data[field.key];
+    if (value === undefined || value === null) return '-';
+    if (field.type === 'role_assignment' && typeof value === 'object' && !Array.isArray(value)) {
+      const roleMap = Object.fromEntries(ROLE_CODES.map((r: any) => [r.code, r.label]));
+      return Object.entries(value as Record<string, string>).map(([code, uid]) => `${roleMap[code] || code}: ${userMap[uid] || uid}`).join('; ') || '-';
+    }
+    if (field.type === 'user') return userMap[value] || value;
+    if (typeof value === 'boolean') return value ? '是' : '否';
+    if (Array.isArray(value)) {
+      return value.length > 0 && typeof value[0] === 'object' && value[0].filename
+        ? value.map((f: any) => f.filename).join(', ') : value.join(', ');
+    }
+    return String(value);
+  };
+
+  if (isMobileForm) {
+    return (
+      <div className="ds-detail-section" style={{ marginTop: 12, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+        <div className="ds-section-title">关联任务表单数据</div>
+        {fields.map((field: any) => (
+          <div key={field.key} className="ds-info-row">
+            <span className="ds-info-label">{field.label}</span>
+            <span className="ds-info-value">{formatFieldValue(field)}</span>
+          </div>
+        ))}
+        <div style={{ fontSize: 11, color: 'var(--ds-text-secondary)', marginTop: 8 }}>
+          提交时间: {submission.submitted_at ? dayjs(submission.submitted_at).format('YYYY-MM-DD HH:mm') : '-'}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ marginTop: 16, padding: 12, background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f' }}>
       <Text strong style={{ fontSize: 13, marginBottom: 8, display: 'block' }}>关联任务表单数据</Text>
       <Descriptions size="small" column={2} bordered>
-        {fields.map((field: any) => {
-          let value = data[field.key];
-          if (value === undefined || value === null) value = '-';
-          else if (field.type === 'role_assignment' && typeof value === 'object' && !Array.isArray(value)) {
-            const roleMap = Object.fromEntries(ROLE_CODES.map((r: any) => [r.code, r.label]));
-            const lines = Object.entries(value as Record<string, string>)
-              .map(([code, uid]) => `${roleMap[code] || code}: ${userMap[uid] || uid}`)
-              .join('; ');
-            value = lines || '-';
-          }
-          else if (field.type === 'user') value = userMap[value] || value;
-          else if (typeof value === 'boolean') value = value ? '是' : '否';
-          else if (Array.isArray(value)) {
-            if (value.length > 0 && typeof value[0] === 'object' && value[0].filename) {
-              value = value.map((f: any) => f.filename).join(', ');
-            } else {
-              value = value.join(', ');
-            }
-          }
-          return (
-            <Descriptions.Item key={field.key} label={field.label}>
-              {String(value)}
-            </Descriptions.Item>
-          );
-        })}
+        {fields.map((field: any) => (
+          <Descriptions.Item key={field.key} label={field.label}>
+            {formatFieldValue(field)}
+          </Descriptions.Item>
+        ))}
       </Descriptions>
       <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
         提交时间: {submission.submitted_at ? dayjs(submission.submitted_at).format('YYYY-MM-DD HH:mm') : '-'}

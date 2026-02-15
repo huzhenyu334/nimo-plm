@@ -14,6 +14,11 @@ import CorrectiveActions from '@/pages/srm/CorrectiveActions';
 import Evaluations from '@/pages/srm/Evaluations';
 import SRMProjectDetail from '@/pages/srm/ProjectDetail';
 import SRMEquipment from '@/pages/srm/Equipment';
+import ECNList from '@/pages/ECN';
+import ECNDetail from '@/pages/ECN/ECNDetail';
+import ECNForm from '@/pages/ECN/ECNForm';
+import BOMManagement from '@/pages/BOMManagement';
+import BOMManagementDetail from '@/pages/BOMManagementDetail';
 import { useAuth } from '@/contexts/AuthContext';
 
 // 受保护路由组件
@@ -91,6 +96,34 @@ export const router = createBrowserRouter([
       {
         path: 'roles',
         element: <RoleManagement />,
+      },
+      {
+        path: '__my__',
+        element: <></>,
+      },
+      {
+        path: 'bom-management',
+        element: <BOMManagement />,
+      },
+      {
+        path: 'bom-management/:projectId',
+        element: <BOMManagementDetail />,
+      },
+      {
+        path: 'ecn',
+        element: <ECNList />,
+      },
+      {
+        path: 'ecn/new',
+        element: <ECNForm />,
+      },
+      {
+        path: 'ecn/:id',
+        element: <ECNDetail />,
+      },
+      {
+        path: 'ecn/:id/edit',
+        element: <ECNForm />,
       },
       {
         path: 'srm',

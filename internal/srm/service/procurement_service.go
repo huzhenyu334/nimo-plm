@@ -315,11 +315,27 @@ func (s *ProcurementService) AutoCreatePRFromBOM(ctx context.Context, projectID,
 		if bi.MaterialID != nil {
 			materialID = *bi.MaterialID
 		}
+		materialCode := ""
+		if bi.ExtendedAttrs != nil {
+			if v, ok := bi.ExtendedAttrs["manufacturer_pn"]; ok {
+				if s, ok := v.(string); ok {
+					materialCode = s
+				}
+			}
+		}
+		specification := ""
+		if bi.ExtendedAttrs != nil {
+			if v, ok := bi.ExtendedAttrs["specification"]; ok {
+				if s, ok := v.(string); ok {
+					specification = s
+				}
+			}
+		}
 		items = append(items, BOMItemInfo{
 			MaterialID:    materialID,
-			MaterialCode:  bi.ManufacturerPN,
+			MaterialCode:  materialCode,
 			MaterialName:  bi.Name,
-			Specification: bi.Specification,
+			Specification: specification,
 			Category:      bi.Category,
 			Quantity:      bi.Quantity,
 			Unit:          bi.Unit,

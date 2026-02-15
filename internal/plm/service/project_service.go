@@ -27,10 +27,6 @@ type ProjectService struct {
 	feishuClient *feishu.FeishuClient
 	userRepo     *repository.UserRepository
 	bomSvc       *ProjectBOMService
-	// SRM集成：BOM创建后自动生成打样采购需求
-	srmProcurementSvc interface {
-		AutoCreatePRFromBOM(ctx context.Context, projectID, bomID, userID string) (string, error)
-	}
 }
 
 // SetApprovalService 注入审批服务（避免循环依赖）
@@ -47,13 +43,6 @@ func (s *ProjectService) SetBOMService(svc *ProjectBOMService) {
 func (s *ProjectService) SetFeishuClient(fc *feishu.FeishuClient, userRepo *repository.UserRepository) {
 	s.feishuClient = fc
 	s.userRepo = userRepo
-}
-
-// SetSRMProcurementService 注入SRM采购服务（BOM创建后自动生成打样PR）
-func (s *ProjectService) SetSRMProcurementService(svc interface {
-	AutoCreatePRFromBOM(ctx context.Context, projectID, bomID, userID string) (string, error)
-}) {
-	s.srmProcurementSvc = svc
 }
 
 // NewProjectService 创建项目服务
@@ -416,7 +405,7 @@ func (s *ProjectService) ListTasks(ctx context.Context, projectID string, page, 
 
 			allCompleted := true
 			for _, dep := range tasks[i].Dependencies {
-				if dep.DependsOnStatus != "completed" && dep.DependsOnStatus != "submitted" {
+				if dep.DependsOnStatus != "completed" {
 					allCompleted = false
 					break
 				}
@@ -428,10 +417,6 @@ func (s *ProjectService) ListTasks(ctx context.Context, projectID string, page, 
 				tasks[i].ActualStart = &now
 				_ = s.taskRepo.Update(ctx, &tasks[i])
 				go s.notifyTaskActivation(context.Background(), &tasks[i])
-				// SRM采购任务激活时，自动关联SRM项目
-				if tasks[i].TaskType == entity.TaskTypeSRMProcurement {
-					go s.linkSRMProjectToTask(context.Background(), &tasks[i])
-				}
 			}
 		}
 	}
@@ -864,7 +849,7 @@ func (s *ProjectService) ProcessBOMUploadFields(ctx context.Context, form *entit
 	}
 
 	for _, f := range fields {
-		if f.Type != "bom_upload" {
+		if f.Type != "bom_upload" && f.Type != "ebom_control" && f.Type != "pbom_control" && f.Type != "mbom_control" {
 			continue
 		}
 
@@ -875,18 +860,29 @@ func (s *ProjectService) ProcessBOMUploadFields(ctx context.Context, form *entit
 			continue
 		}
 
-		bomData, ok := raw.(map[string]interface{})
-		if !ok {
+		// 新控件类型直接提交 []items，旧bom_upload提交 {filename, items, item_count}
+		var itemsSlice []interface{}
+		var bomData map[string]interface{}
+
+		if arr, ok := raw.([]interface{}); ok {
+			// 新控件格式：直接是数组
+			itemsSlice = arr
+		} else if m, ok := raw.(map[string]interface{}); ok {
+			// 旧bom_upload格式：{items: [...]}
+			bomData = m
+			rawItems, ok := bomData["items"]
+			if !ok || rawItems == nil {
+				continue
+			}
+			itemsSlice, ok = rawItems.([]interface{})
+			if !ok {
+				continue
+			}
+		} else {
 			continue
 		}
 
-		// 提取 items 数组
-		rawItems, ok := bomData["items"]
-		if !ok || rawItems == nil {
-			continue
-		}
-		itemsSlice, ok := rawItems.([]interface{})
-		if !ok || len(itemsSlice) == 0 {
+		if len(itemsSlice) == 0 {
 			continue
 		}
 
@@ -898,51 +894,27 @@ func (s *ProjectService) ProcessBOMUploadFields(ctx context.Context, form *entit
 				continue
 			}
 			item := ParsedBOMItem{
-				ItemNumber:        toInt(itemMap["item_number"]),
-				Reference:         toStr(itemMap["reference"]),
-				Name:              toStr(itemMap["name"]),
-				Specification:     toStr(itemMap["specification"]),
-				Quantity:          toFloat64(itemMap["quantity"]),
-				Unit:              toStr(itemMap["unit"]),
-				Category:          toStr(itemMap["category"]),
-				Manufacturer:      toStr(itemMap["manufacturer"]),
-				ManufacturerPN:    toStr(itemMap["manufacturer_pn"]),
-				MaterialType:      toStr(itemMap["material_type"]),
-				ProcessType:       toStr(itemMap["process_type"]),
-				WeightGrams:       toFloat64(itemMap["weight_grams"]),
-				TargetPrice:       toFloat64(itemMap["target_price"]),
-				ToolingEstimate:   toFloat64(itemMap["tooling_estimate"]),
-				IsAppearancePart:  toBool(itemMap["is_appearance_part"]),
-				AssemblyMethod:    toStr(itemMap["assembly_method"]),
-				ToleranceGrade:    toStr(itemMap["tolerance_grade"]),
-				ThumbnailURL:      toStr(itemMap["thumbnail_url"]),
-				Notes:             toStr(itemMap["notes"]),
-				Drawing2DFileID:   toStr(itemMap["drawing_2d_file_id"]),
-				Drawing2DFileName: toStr(itemMap["drawing_2d_file_name"]),
-				Drawing3DFileID:   toStr(itemMap["drawing_3d_file_id"]),
-				Drawing3DFileName: toStr(itemMap["drawing_3d_file_name"]),
-				// EBOM fields
-				ItemType:            toStr(itemMap["item_type"]),
-				Designator:          toStr(itemMap["designator"]),
-				Package:             toStr(itemMap["package"]),
-				PCBLayers:           toInt(itemMap["pcb_layers"]),
-				PCBThickness:        toStr(itemMap["pcb_thickness"]),
-				PCBMaterial:         toStr(itemMap["pcb_material"]),
-				PCBDimensions:       toStr(itemMap["pcb_dimensions"]),
-				PCBSurfaceFinish:    toStr(itemMap["pcb_surface_finish"]),
-				ServiceType:         toStr(itemMap["service_type"]),
-				ProcessRequirements: toStr(itemMap["process_requirements"]),
-				Attachments:         toStr(itemMap["attachments"]),
-				// PBOM fields
-				DesignFileID:   toStr(itemMap["design_file_id"]),
-				DesignFileName: toStr(itemMap["design_file_name"]),
-				LanguageCode:   toStr(itemMap["language_code"]),
-				// Shared fields
-				Supplier:          toStr(itemMap["supplier"]),
-				UnitPrice:         toFloat64(itemMap["unit_price"]),
-				LeadTimeDays:      toInt(itemMap["lead_time_days"]),
-				ProcurementType:   toStr(itemMap["procurement_type"]),
-				IsCritical:        toBool(itemMap["is_critical"]),
+				ItemNumber:     toInt(itemMap["item_number"]),
+				Name:           toStr(itemMap["name"]),
+				Specification:  toStr(itemMap["specification"]),
+				Category:       toStr(itemMap["category"]),
+				SubCategory:    toStr(itemMap["sub_category"]),
+				Quantity:       toFloat64(itemMap["quantity"]),
+				Unit:           toStr(itemMap["unit"]),
+				Reference:      toStr(itemMap["reference"]),
+				Manufacturer:   toStr(itemMap["manufacturer"]),
+				ManufacturerPN: toStr(itemMap["manufacturer_pn"]),
+				Supplier:       toStr(itemMap["supplier"]),
+				UnitPrice:      toFloat64(itemMap["unit_price"]),
+				LeadTimeDays:   toInt(itemMap["lead_time_days"]),
+				Notes:          toStr(itemMap["notes"]),
+				IsCritical:     toBool(itemMap["is_critical"]),
+			}
+			// Collect extended_attrs from remaining fields
+			if ea, ok := itemMap["extended_attrs"]; ok {
+				if eaMap, ok := ea.(map[string]interface{}); ok {
+					item.ExtendedAttrs = eaMap
+				}
 			}
 			if item.Unit == "" {
 				item.Unit = "pcs"
@@ -956,8 +928,11 @@ func (s *ProjectService) ProcessBOMUploadFields(ctx context.Context, form *entit
 			continue
 		}
 
-		// BOM名称：优先用文件名，否则用字段label
-		bomName := toStr(bomData["filename"])
+		// BOM名称：优先用文件名（旧格式），否则用字段label
+		var bomName string
+		if bomData != nil {
+			bomName = toStr(bomData["filename"])
+		}
 		if bomName == "" {
 			bomName = f.Label
 		}
@@ -965,10 +940,19 @@ func (s *ProjectService) ProcessBOMUploadFields(ctx context.Context, form *entit
 			bomName = "BOM from task form"
 		}
 
-		// BOM类型：从field定义读取，默认EBOM
+		// BOM类型：新控件类型直接从type推断，旧bom_upload从field定义读取
 		bomType := f.BomType
 		if bomType == "" {
-			bomType = "EBOM"
+			switch f.Type {
+			case "ebom_control":
+				bomType = "EBOM"
+			case "pbom_control":
+				bomType = "PBOM"
+			case "mbom_control":
+				bomType = "MBOM"
+			default:
+				bomType = "EBOM"
+			}
 		}
 
 		bomID, err := s.bomSvc.CreateBOMFromParsedItems(ctx, projectID, userID, bomName, parsedItems, bomType)
@@ -977,70 +961,6 @@ func (s *ProjectService) ProcessBOMUploadFields(ctx context.Context, form *entit
 			continue
 		}
 		log.Printf("[ProcessBOMUploadFields] BOM created successfully: field=%s, bomType=%s, bomID=%s, items=%d", f.Key, bomType, bomID, len(parsedItems))
-		// BOM创建成功后，自动创建SRM打样采购需求
-		// 注意：不再创建PLM采购跟踪任务，该任务由模板自动生成并通过依赖链激活
-		if s.srmProcurementSvc != nil && bomID != "" {
-			srmPRID, err := s.srmProcurementSvc.AutoCreatePRFromBOM(ctx, projectID, bomID, userID)
-			if err != nil {
-				log.Printf("[WARN] auto-create SRM PR failed for BOM %s: %v", bomID, err)
-			} else if srmPRID != "" {
-				log.Printf("[SRM] SRM PR created: project=%s, bom=%s, srm_pr=%s (task linking deferred to dependency activation)", projectID, bomID, srmPRID)
-			}
-		}
-	}
-}
-
-// CreateSRMProcurementTask 自动创建SRM采购跟踪任务
-// Deprecated: SRM采购任务现在由模板自动生成，通过依赖链激活后自动关联SRM项目。
-// 保留此方法以兼容非模板创建的项目。
-func (s *ProjectService) CreateSRMProcurementTask(ctx context.Context, projectID string, phaseID *string, srmPRID, userID string) {
-	// 生成任务编码
-	code, err := s.taskRepo.GenerateCode(ctx, projectID)
-	if err != nil {
-		log.Printf("[CreateSRMProcurementTask] 生成任务编码失败: %v", err)
-		return
-	}
-
-	// 查找采购角色负责人
-	var assigneeID *string
-	assignment, err := s.taskRepo.FindRoleAssignment(ctx, projectID, "采购")
-	if err == nil && assignment != nil {
-		assigneeID = &assignment.UserID
-	}
-
-	now := time.Now()
-	task := &entity.Task{
-		ID:                 uuid.New().String()[:32],
-		ProjectID:          projectID,
-		PhaseID:            phaseID,
-		Code:               code,
-		Title:              "打样采购跟踪",
-		Name:               "打样采购跟踪",
-		Description:        "BOM审批通过后自动创建，请跟踪打样采购进度",
-		TaskType:           entity.TaskTypeSRMProcurement,
-		Status:             entity.TaskStatusInProgress,
-		Priority:           entity.TaskPriorityHigh,
-		AssigneeID:         assigneeID,
-		LinkedSRMProjectID: &srmPRID,
-		CreatedBy:          userID,
-		CreatedAt:          now,
-		UpdatedAt:          now,
-	}
-	task.ActualStart = &now
-
-	if err := s.taskRepo.Create(ctx, task); err != nil {
-		log.Printf("[CreateSRMProcurementTask] 创建任务失败: %v", err)
-		return
-	}
-
-	log.Printf("[CreateSRMProcurementTask] 已创建SRM采购任务: project=%s, task=%s, assignee=%v", projectID, task.ID, assigneeID)
-
-	// SSE: 通知前端新任务
-	sse.PublishTaskUpdate(projectID, task.ID, "task_created")
-
-	// 通知负责人
-	if assigneeID != nil {
-		go s.notifyTaskActivation(context.Background(), task)
 	}
 }
 
@@ -1391,7 +1311,7 @@ func (s *ProjectService) activateDownstreamTasks(ctx context.Context, completedT
 		allCompleted := true
 		for _, depID := range depIDs {
 			status := statusMap[depID]
-			if status != "completed" && status != "submitted" {
+			if status != "completed" {
 				allCompleted = false
 				break
 			}
@@ -1409,51 +1329,7 @@ func (s *ProjectService) activateDownstreamTasks(ctx context.Context, completedT
 					sse.PublishUserTaskUpdate(*downstreamTasks[i].AssigneeID, projectID, downstreamTasks[i].ID, "task_activated")
 				}
 				go s.notifyTaskActivation(context.Background(), &downstreamTasks[i])
-
-				// SRM采购任务激活时，自动关联SRM项目
-				if downstreamTasks[i].TaskType == entity.TaskTypeSRMProcurement {
-					go s.linkSRMProjectToTask(context.Background(), &downstreamTasks[i])
-				}
 			}
-		}
-	}
-}
-
-// linkSRMProjectToTask 将SRM采购任务与最近创建的SRM项目关联
-// 当模板中的SRM采购任务通过依赖链被激活时调用
-func (s *ProjectService) linkSRMProjectToTask(ctx context.Context, task *entity.Task) {
-	db := s.projectRepo.DB()
-
-	var srmProjectID string
-	err := db.Table("srm_projects").
-		Where("plm_project_id = ?", task.ProjectID).
-		Order("created_at DESC").
-		Limit(1).
-		Pluck("id", &srmProjectID).Error
-
-	if err != nil || srmProjectID == "" {
-		log.Printf("[SRM] No SRM project found for PLM project %s, skipping link for task %s", task.ProjectID, task.ID)
-		return
-	}
-
-	// 更新任务的 linked_srm_project_id
-	if err := db.Model(&entity.Task{}).
-		Where("id = ?", task.ID).
-		Update("linked_srm_project_id", srmProjectID).Error; err != nil {
-		log.Printf("[SRM] Failed to link task %s to SRM project %s: %v", task.ID, srmProjectID, err)
-		return
-	}
-
-	log.Printf("[SRM] Linked PLM task %s to SRM project %s", task.ID, srmProjectID)
-
-	// 同时为SRM任务分配采购角色负责人（如果尚未分配）
-	if task.AssigneeID == nil || *task.AssigneeID == "" {
-		assignment, err := s.taskRepo.FindRoleAssignment(ctx, task.ProjectID, "采购")
-		if err == nil && assignment != nil {
-			db.Model(&entity.Task{}).
-				Where("id = ?", task.ID).
-				Update("assignee_id", assignment.UserID)
-			log.Printf("[SRM] Auto-assigned 采购 role user %s to task %s", assignment.UserID, task.ID)
 		}
 	}
 }

@@ -62,7 +62,7 @@ func (s *CMFVariantService) Create(ctx context.Context, bomItemID string, input 
 	if err != nil {
 		return nil, fmt.Errorf("零件不存在: %w", err)
 	}
-	if !item.IsAppearancePart {
+	if !getExtAttrBool(item.ExtendedAttrs, "is_appearance_part") {
 		return nil, fmt.Errorf("只有外观件才能添加CMF变体")
 	}
 
@@ -74,7 +74,7 @@ func (s *CMFVariantService) Create(ctx context.Context, bomItemID string, input 
 	materialCode := s.generateMaterialCode(item, nextIndex)
 
 	// 材质从BOM主零件继承
-	material := item.MaterialType
+	material := getExtAttr(item.ExtendedAttrs, "material_type")
 
 	variant := &entity.BOMItemCMFVariant{
 		ID:                   uuid.New().String()[:32],
@@ -166,9 +166,10 @@ func (s *CMFVariantService) Delete(ctx context.Context, variantID string) error 
 }
 
 // GetAppearanceParts 获取项目所有外观件及其CMF变体
+// 从EBOM中查找 category=structural 且 is_appearance_part=true 的结构件
 // 如果外观件没有CMF变体，自动创建一条默认的draft变体
 func (s *CMFVariantService) GetAppearanceParts(ctx context.Context, projectID string) ([]map[string]interface{}, error) {
-	boms, err := s.bomRepo.ListByProject(ctx, projectID, "SBOM", "")
+	boms, err := s.bomRepo.ListByProject(ctx, projectID, "EBOM", "")
 	if err != nil {
 		return nil, fmt.Errorf("获取BOM列表失败: %w", err)
 	}
@@ -181,7 +182,11 @@ func (s *CMFVariantService) GetAppearanceParts(ctx context.Context, projectID st
 			continue
 		}
 		for _, item := range bomDetail.Items {
-			if !item.IsAppearancePart || item.IsVariant {
+			// Only structural parts with is_appearance_part=true
+			if item.Category != "structural" {
+				continue
+			}
+			if !getExtAttrBool(item.ExtendedAttrs, "is_appearance_part") || getExtAttrBool(item.ExtendedAttrs, "is_variant") {
 				continue
 			}
 			variants, _ := s.variantRepo.ListByBOMItem(ctx, item.ID)
@@ -189,7 +194,7 @@ func (s *CMFVariantService) GetAppearanceParts(ctx context.Context, projectID st
 			// 自动创建默认CMF变体(#7: 默认1条)
 			if len(variants) == 0 {
 				materialCode := s.generateMaterialCode(&item, 1)
-				material := item.MaterialType
+				material := getExtAttr(item.ExtendedAttrs, "material_type")
 				defaultVariant := &entity.BOMItemCMFVariant{
 					ID:           uuid.New().String()[:32],
 					BOMItemID:    item.ID,
@@ -217,60 +222,70 @@ func (s *CMFVariantService) GetAppearanceParts(ctx context.Context, projectID st
 }
 
 // GetSRMItems 获取可采购项（含CMF变体展开）
+// 从所有BOM类型中获取物料（EBOM + PBOM）
 func (s *CMFVariantService) GetSRMItems(ctx context.Context, projectID string) ([]map[string]interface{}, error) {
-	boms, err := s.bomRepo.ListByProject(ctx, projectID, "SBOM", "")
-	if err != nil {
-		return nil, fmt.Errorf("获取BOM列表失败: %w", err)
-	}
-
 	var result []map[string]interface{}
 
-	for _, bom := range boms {
-		bomDetail, err := s.bomRepo.FindByID(ctx, bom.ID)
+	// Query all BOM types
+	for _, bomType := range []string{"EBOM", "PBOM"} {
+		boms, err := s.bomRepo.ListByProject(ctx, projectID, bomType, "")
 		if err != nil {
 			continue
 		}
-		for _, item := range bomDetail.Items {
-			if !item.SamplingReady || item.IsVariant {
+
+		for _, bom := range boms {
+			bomDetail, err := s.bomRepo.FindByID(ctx, bom.ID)
+			if err != nil {
 				continue
 			}
-
-			if !item.IsAppearancePart {
-				materialCode := ""
-				if item.Material != nil {
-					materialCode = item.Material.Code
+			for _, item := range bomDetail.Items {
+				if getExtAttrBool(item.ExtendedAttrs, "is_variant") {
+					continue
 				}
-				result = append(result, map[string]interface{}{
-					"type":          "standard",
-					"bom_item_id":   item.ID,
-					"material_code": materialCode,
-					"name":          item.Name,
-					"quantity":      item.Quantity,
-					"unit":          item.Unit,
-					"bom_item":      item,
-				})
-			} else {
-				variants, _ := s.variantRepo.ListByBOMItem(ctx, item.ID)
-				for _, v := range variants {
+
+				if !getExtAttrBool(item.ExtendedAttrs, "is_appearance_part") {
+					materialCode := ""
+					if item.Material != nil {
+						materialCode = item.Material.Code
+					}
 					result = append(result, map[string]interface{}{
-						"type":           "cmf_variant",
-						"bom_item_id":    item.ID,
-						"cmf_variant_id": v.ID,
-						"material_code":  v.MaterialCode,
-						"name":           item.Name,
-						"quantity":       item.Quantity,
-						"unit":           item.Unit,
-						"cmf": map[string]interface{}{
-							"material":     v.Material,
-							"finish":       v.Finish,
-							"color_hex":    v.ColorHex,
-							"texture":      v.Texture,
-							"coating":      v.Coating,
-							"pantone_code": v.PantoneCode,
-						},
-						"bom_item":    item,
-						"cmf_variant": v,
+						"type":          "standard",
+						"bom_item_id":   item.ID,
+						"material_code": materialCode,
+						"name":          item.Name,
+						"quantity":      item.Quantity,
+						"unit":          item.Unit,
+						"category":      item.Category,
+						"sub_category":  item.SubCategory,
+						"bom_type":      bomType,
+						"bom_item":      item,
 					})
+				} else {
+					variants, _ := s.variantRepo.ListByBOMItem(ctx, item.ID)
+					for _, v := range variants {
+						result = append(result, map[string]interface{}{
+							"type":           "cmf_variant",
+							"bom_item_id":    item.ID,
+							"cmf_variant_id": v.ID,
+							"material_code":  v.MaterialCode,
+							"name":           item.Name,
+							"quantity":       item.Quantity,
+							"unit":           item.Unit,
+							"category":       item.Category,
+							"sub_category":   item.SubCategory,
+							"bom_type":       bomType,
+							"cmf": map[string]interface{}{
+								"material":     v.Material,
+								"finish":       v.Finish,
+								"color_hex":    v.ColorHex,
+								"texture":      v.Texture,
+								"coating":      v.Coating,
+								"pantone_code": v.PantoneCode,
+							},
+							"bom_item":    item,
+							"cmf_variant": v,
+						})
+					}
 				}
 			}
 		}
@@ -289,4 +304,47 @@ func (s *CMFVariantService) generateMaterialCode(item *entity.ProjectBOMItem, in
 		baseCode = fmt.Sprintf("AP-%03d", item.ItemNumber)
 	}
 	return fmt.Sprintf("%s-V%02d", baseCode, index)
+}
+
+// getExtAttr extracts a string value from JSONB extended_attrs
+func getExtAttr(attrs entity.JSONB, key string) string {
+	if attrs == nil {
+		return ""
+	}
+	if v, ok := attrs[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+		return fmt.Sprintf("%v", v)
+	}
+	return ""
+}
+
+// getExtAttrBool extracts a boolean value from JSONB extended_attrs
+func getExtAttrBool(attrs entity.JSONB, key string) bool {
+	if attrs == nil {
+		return false
+	}
+	v, ok := attrs[key]
+	if !ok {
+		return false
+	}
+	switch b := v.(type) {
+	case bool:
+		return b
+	case float64:
+		return b != 0
+	case string:
+		return b == "true" || b == "1" || b == "Y" || b == "是"
+	default:
+		return false
+	}
+}
+
+// setExtAttr sets a value in JSONB extended_attrs, initializing if nil
+func setExtAttr(attrs *entity.JSONB, key string, value interface{}) {
+	if *attrs == nil {
+		*attrs = entity.JSONB{}
+	}
+	(*attrs)[key] = value
 }

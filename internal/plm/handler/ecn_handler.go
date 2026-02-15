@@ -96,7 +96,8 @@ func (h *ECNHandler) Update(c *gin.Context) {
 		return
 	}
 
-	ecn, err := h.svc.Update(c.Request.Context(), id, &req)
+	userID := GetUserID(c)
+	ecn, err := h.svc.Update(c.Request.Context(), id, userID, &req)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -113,7 +114,8 @@ func (h *ECNHandler) Submit(c *gin.Context) {
 		return
 	}
 
-	ecn, err := h.svc.Submit(c.Request.Context(), id)
+	userID := GetUserID(c)
+	ecn, err := h.svc.Submit(c.Request.Context(), id, userID)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -229,6 +231,30 @@ func (h *ECNHandler) AddAffectedItem(c *gin.Context) {
 	Created(c, item)
 }
 
+// UpdateAffectedItem 更新受影响项目
+func (h *ECNHandler) UpdateAffectedItem(c *gin.Context) {
+	ecnID := c.Param("id")
+	itemID := c.Param("itemId")
+	if ecnID == "" || itemID == "" {
+		BadRequest(c, "ECN ID and Item ID are required")
+		return
+	}
+
+	var req service.UpdateAffectedItemRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "Invalid request body: "+err.Error())
+		return
+	}
+
+	item, err := h.svc.UpdateAffectedItem(c.Request.Context(), ecnID, itemID, &req)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, item)
+}
+
 // RemoveAffectedItem 移除受影响项目
 func (h *ECNHandler) RemoveAffectedItem(c *gin.Context) {
 	ecnID := c.Param("id")
@@ -303,4 +329,132 @@ func (h *ECNHandler) ListByProduct(c *gin.Context) {
 	}
 
 	Success(c, ecns)
+}
+
+// ============================================================
+// 新增API端点
+// ============================================================
+
+// GetStats 获取ECN统计数据
+func (h *ECNHandler) GetStats(c *gin.Context) {
+	userID := GetUserID(c)
+	stats, err := h.svc.GetStats(c.Request.Context(), userID)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, stats)
+}
+
+// ListMyPending 获取待我审批的ECN
+func (h *ECNHandler) ListMyPending(c *gin.Context) {
+	userID := GetUserID(c)
+	ecns, err := h.svc.ListMyPending(c.Request.Context(), userID)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"items": ecns})
+}
+
+// ListTasks 获取ECN执行任务列表
+func (h *ECNHandler) ListTasks(c *gin.Context) {
+	ecnID := c.Param("id")
+	if ecnID == "" {
+		BadRequest(c, "ECN ID is required")
+		return
+	}
+
+	tasks, err := h.svc.ListTasks(c.Request.Context(), ecnID)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"items": tasks})
+}
+
+// CreateTask 创建ECN执行任务
+func (h *ECNHandler) CreateTask(c *gin.Context) {
+	ecnID := c.Param("id")
+	if ecnID == "" {
+		BadRequest(c, "ECN ID is required")
+		return
+	}
+
+	var req service.CreateECNTaskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "Invalid request body: "+err.Error())
+		return
+	}
+
+	userID := GetUserID(c)
+	task, err := h.svc.CreateTask(c.Request.Context(), ecnID, userID, &req)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Created(c, task)
+}
+
+// UpdateTask 更新ECN执行任务
+func (h *ECNHandler) UpdateTask(c *gin.Context) {
+	ecnID := c.Param("id")
+	taskID := c.Param("taskId")
+	if ecnID == "" || taskID == "" {
+		BadRequest(c, "ECN ID and Task ID are required")
+		return
+	}
+
+	var req service.UpdateECNTaskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "Invalid request body: "+err.Error())
+		return
+	}
+
+	userID := GetUserID(c)
+	task, err := h.svc.UpdateTask(c.Request.Context(), ecnID, taskID, userID, &req)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, task)
+}
+
+// ApplyBOMChanges 一键应用BOM变更
+func (h *ECNHandler) ApplyBOMChanges(c *gin.Context) {
+	ecnID := c.Param("id")
+	if ecnID == "" {
+		BadRequest(c, "ECN ID is required")
+		return
+	}
+
+	userID := GetUserID(c)
+	if err := h.svc.ApplyBOMChanges(c.Request.Context(), ecnID, userID); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"message": "BOM changes applied"})
+}
+
+// ListHistory 获取ECN操作历史
+func (h *ECNHandler) ListHistory(c *gin.Context) {
+	ecnID := c.Param("id")
+	if ecnID == "" {
+		BadRequest(c, "ECN ID is required")
+		return
+	}
+
+	histories, err := h.svc.ListHistory(c.Request.Context(), ecnID)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"items": histories})
 }

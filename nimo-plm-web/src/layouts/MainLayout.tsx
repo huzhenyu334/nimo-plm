@@ -8,7 +8,6 @@ import {
   SnippetsOutlined,
   LogoutOutlined,
   UserOutlined,
-  FolderOutlined,
   AuditOutlined,
   CheckSquareOutlined,
   TeamOutlined,
@@ -20,22 +19,89 @@ import {
   AccountBookOutlined,
   ToolOutlined,
   StarOutlined,
+  SwapOutlined,
+  RightOutlined,
+  ArrowLeftOutlined,
+  PartitionOutlined,
 } from '@ant-design/icons';
 import { Dropdown, Avatar, Space, Spin } from 'antd';
 import { useAuth } from '@/contexts/AuthContext';
-import { useQuery } from '@tanstack/react-query';
-import { projectApi } from '@/api/projects';
+import { useIsMobile } from '@/hooks/useIsMobile';
+
+// Page title mapping for mobile header
+const pageTitles: Record<string, string> = {
+  '/dashboard': '工作台',
+  '/my-tasks': '我的任务',
+  '/projects': '研发项目',
+  '/approvals': '审批中心',
+  '/materials': '物料选型库',
+  '/templates': '流程管理',
+  '/roles': '角色管理',
+  '/bom-management': 'BOM管理',
+  '/ecn': 'ECN变更管理',
+  '/srm': 'SRM采购管理',
+  '/srm/suppliers': '供应商',
+  '/srm/purchase-requests': '采购需求',
+  '/srm/purchase-orders': '采购订单',
+  '/srm/inspections': '来料检验',
+  '/srm/settlements': '对账结算',
+  '/srm/corrective-actions': '8D改进',
+  '/srm/evaluations': '供应商评价',
+  '/srm/equipment': '通用设备',
+};
+
+// Bottom tab configuration
+const bottomTabs = [
+  { path: '/dashboard', label: '工作台', icon: <HomeOutlined /> },
+  { path: '/projects', label: '项目', icon: <ProjectOutlined /> },
+  { path: '/bom-management', label: 'BOM', icon: <PartitionOutlined /> },
+  { path: '/my-tasks', label: '任务', icon: <CheckSquareOutlined /> },
+  { path: '/__my__', label: '我的', icon: <UserOutlined /> },
+];
+
+// Grouped "More" menu items
+const moreMenuGroups = [
+  {
+    title: '项目管理',
+    items: [
+      { path: '/bom-management', label: 'BOM管理', icon: <PartitionOutlined /> },
+      { path: '/templates', label: '流程管理', icon: <SnippetsOutlined /> },
+      { path: '/ecn', label: 'ECN变更管理', icon: <SwapOutlined /> },
+    ],
+  },
+  {
+    title: '采购管理',
+    items: [
+      { path: '/srm', label: 'SRM采购管理', icon: <ShoppingCartOutlined /> },
+      { path: '/srm/suppliers', label: '供应商', icon: <ShopOutlined /> },
+      { path: '/srm/purchase-requests', label: '采购需求', icon: <FileTextOutlined /> },
+      { path: '/srm/purchase-orders', label: '采购订单', icon: <ShoppingCartOutlined /> },
+      { path: '/srm/inspections', label: '来料检验', icon: <SafetyCertificateOutlined /> },
+      { path: '/srm/settlements', label: '对账结算', icon: <AccountBookOutlined /> },
+      { path: '/srm/evaluations', label: '供应商评价', icon: <StarOutlined /> },
+    ],
+  },
+  {
+    title: '系统设置',
+    items: [
+      { path: '/materials', label: '物料选型库', icon: <ExperimentOutlined /> },
+      { path: '/roles', label: '角色管理', icon: <TeamOutlined /> },
+    ],
+  },
+];
+
+// Flat list for path matching
+const allMorePaths = moreMenuGroups.flatMap(g => g.items.map(i => i.path));
 
 const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { user, logout, isLoading } = useAuth();
-
-  // embed=1 模式：隐藏侧边栏和顶栏（用于飞书内嵌）
+  const isMobile = useIsMobile();
+  // embed=1 mode
   const isEmbed = searchParams.get('embed') === '1';
 
-  // embed 模式下设置页面标题
   React.useEffect(() => {
     if (isEmbed) {
       const path = location.pathname;
@@ -45,64 +111,17 @@ const MainLayout: React.FC = () => {
     }
   }, [isEmbed, location.pathname]);
 
-  // 获取项目列表
-  const { data: projectData } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => projectApi.list(),
-    enabled: !!user,
-  });
-
   const menuItems = useMemo(() => {
-    const projects = projectData?.items || [];
-    const projectChildren = projects.map((p: any) => ({
-      path: `/projects/${p.id}`,
-      name: `${p.name}`,
-    }));
-
     return [
-      {
-        path: '/dashboard',
-        name: '工作台',
-        icon: <HomeOutlined />,
-      },
-      {
-        path: '/my-tasks',
-        name: '我的任务',
-        icon: <CheckSquareOutlined />,
-      },
-      {
-        path: '/projects',
-        name: '项目管理',
-        icon: <ProjectOutlined />,
-        children: projectChildren.length > 0 ? [
-          { path: '/projects', name: '全部项目', icon: <FolderOutlined /> },
-          ...projectChildren,
-        ] : undefined,
-      },
-      {
-        path: '/materials',
-        name: '物料选型库',
-        icon: <ExperimentOutlined />,
-      },
-      {
-        path: '/templates',
-        name: '流程管理',
-        icon: <SnippetsOutlined />,
-      },
-      {
-        path: '/approvals',
-        name: '审批管理',
-        icon: <AuditOutlined />,
-        children: [
-          { path: '/approvals', name: '审批中心' },
-          { path: '/approval-admin', name: '审批后台' },
-        ],
-      },
-      {
-        path: '/roles',
-        name: '角色管理',
-        icon: <TeamOutlined />,
-      },
+      { path: '/dashboard', name: '工作台', icon: <HomeOutlined /> },
+      { path: '/my-tasks', name: '我的任务', icon: <CheckSquareOutlined /> },
+      { path: '/projects', name: '项目管理', icon: <ProjectOutlined /> },
+      { path: '/bom-management', name: 'BOM管理', icon: <PartitionOutlined /> },
+      { path: '/materials', name: '物料选型库', icon: <ExperimentOutlined /> },
+      { path: '/templates', name: '流程管理', icon: <SnippetsOutlined /> },
+      { path: '/approvals', name: '审批管理', icon: <AuditOutlined /> },
+      { path: '/ecn', name: 'ECN变更管理', icon: <SwapOutlined /> },
+      { path: '/roles', name: '角色管理', icon: <TeamOutlined /> },
       {
         path: '/srm',
         name: 'SRM 采购管理',
@@ -120,22 +139,16 @@ const MainLayout: React.FC = () => {
         ],
       },
     ];
-  }, [projectData]);
+  }, []);
 
   if (isLoading) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh' 
-      }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <Spin size="large" tip="加载中..." />
       </div>
     );
   }
 
-  // embed 模式：无侧边栏无顶栏，纯内容
   if (isEmbed) {
     return (
       <div style={{ padding: '16px', background: '#fff', minHeight: '100vh' }}>
@@ -144,7 +157,150 @@ const MainLayout: React.FC = () => {
     );
   }
 
-  // Highlight current menu
+  // ===== Mobile Layout =====
+  if (isMobile) {
+    const currentPath = location.pathname;
+    const isMyPage = currentPath === '/__my__';
+    // Determine if we're on a sub-page (need back button)
+    const isSubPage = !isMyPage && !bottomTabs.some((t) => t.path !== '/__my__' && t.path === currentPath) &&
+      !allMorePaths.includes(currentPath);
+    // Get page title
+    let pageTitle = isMyPage ? '我的' : (pageTitles[currentPath] || 'nimo PLM');
+    if (currentPath.startsWith('/projects/') && currentPath !== '/projects') {
+      pageTitle = '项目详情';
+    }
+    if (currentPath.startsWith('/templates/') && currentPath !== '/templates') {
+      pageTitle = '流程详情';
+    }
+
+    // Active tab matching - special handling for /__my__ and /bom-management
+    let activeTab = '';
+    if (isMyPage) {
+      activeTab = '/__my__';
+    } else if (currentPath.startsWith('/bom-management')) {
+      activeTab = '/bom-management';
+    } else {
+      activeTab = bottomTabs.find((t) => t.path !== '/__my__' && t.path !== '/bom-management' && currentPath.startsWith(t.path))?.path || '';
+    }
+
+    return (
+      <div className="mobile-content">
+        {/* Mobile Header */}
+        <div className="mobile-header">
+          {isSubPage ? (
+            <div className="mobile-header-back" onClick={() => navigate(-1)}>
+              <ArrowLeftOutlined />
+            </div>
+          ) : (
+            <div className="mobile-header-action" />
+          )}
+          <div className="mobile-header-title">{pageTitle}</div>
+          <div className="mobile-header-action" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Avatar
+              size={28}
+              src={user?.avatar_url}
+              style={{ background: '#1677ff', fontSize: 12 }}
+            >
+              {user?.name?.[0]}
+            </Avatar>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        {isMyPage ? (
+          <div style={{ padding: '0 0 16px' }}>
+            {/* User info */}
+            <div style={{ background: '#fff', padding: '20px 16px', display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+              <Avatar size={48} src={user?.avatar_url} style={{ background: '#1677ff', fontSize: 20 }}>
+                {user?.name?.[0]}
+              </Avatar>
+              <div>
+                <div style={{ fontSize: 17, fontWeight: 600 }}>{user?.name || '用户'}</div>
+                <div style={{ fontSize: 13, color: '#999' }}>{user?.email || ''}</div>
+              </div>
+            </div>
+
+            {/* Quick entries */}
+            <div style={{ background: '#fff', marginBottom: 8 }}>
+              <div
+                className="mobile-my-menu-item"
+                onClick={() => navigate('/my-tasks')}
+              >
+                <CheckSquareOutlined style={{ fontSize: 20, color: '#1677ff' }} />
+                <span style={{ flex: 1 }}>我的任务</span>
+                <RightOutlined style={{ fontSize: 12, color: '#ccc' }} />
+              </div>
+              <div
+                className="mobile-my-menu-item"
+                onClick={() => navigate('/approvals')}
+              >
+                <AuditOutlined style={{ fontSize: 20, color: '#faad14' }} />
+                <span style={{ flex: 1 }}>审批中心</span>
+                <RightOutlined style={{ fontSize: 12, color: '#ccc' }} />
+              </div>
+            </div>
+
+            {/* Grouped more menu */}
+            <div style={{ background: '#fff', marginBottom: 8 }}>
+              {moreMenuGroups.map((group) => (
+                <div key={group.title}>
+                  <div className="mobile-my-group-title">{group.title}</div>
+                  {group.items.map((item) => (
+                    <div
+                      key={item.path}
+                      className="mobile-my-menu-item"
+                      onClick={() => navigate(item.path)}
+                    >
+                      <span style={{ fontSize: 20, color: '#666' }}>{item.icon}</span>
+                      <span style={{ flex: 1 }}>{item.label}</span>
+                      <RightOutlined style={{ fontSize: 12, color: '#ccc' }} />
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+
+            {/* Logout */}
+            <div style={{ background: '#fff' }}>
+              <div
+                className="mobile-my-menu-item"
+                style={{ color: '#ff4d4f', justifyContent: 'center' }}
+                onClick={() => { logout(); navigate('/login'); }}
+              >
+                <LogoutOutlined style={{ fontSize: 20 }} />
+                <span>退出登录</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <Outlet />
+        )}
+
+        {/* Bottom Tab Bar */}
+        <div className="mobile-bottom-nav">
+          {bottomTabs.map((tab) => (
+            <div
+              key={tab.path}
+              className={`mobile-bottom-nav-item ${activeTab === tab.path ? 'active' : ''}`}
+              onClick={() => {
+                if (tab.path === '/__my__') {
+                  // "我的" just renders inline, no real navigation needed
+                  navigate('/__my__');
+                } else {
+                  navigate(tab.path);
+                }
+              }}
+            >
+              {tab.icon}
+              <span>{tab.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ===== Desktop Layout =====
   const menuPathname = location.pathname;
 
   const layoutProps: ProLayoutProps = {
@@ -173,22 +329,13 @@ const MainLayout: React.FC = () => {
         <Dropdown
           menu={{
             items: [
-              {
-                key: 'profile',
-                icon: <UserOutlined />,
-                label: '个人信息',
-              },
-              {
-                type: 'divider',
-              },
+              { key: 'profile', icon: <UserOutlined />, label: '个人信息' },
+              { type: 'divider' },
               {
                 key: 'logout',
                 icon: <LogoutOutlined />,
                 label: '退出登录',
-                onClick: () => {
-                  logout();
-                  navigate('/login');
-                },
+                onClick: () => { logout(); navigate('/login'); },
               },
             ],
           }}

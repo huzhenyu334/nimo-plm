@@ -52,7 +52,6 @@ import {
   DeleteOutlined,
   SendOutlined,
   LockOutlined,
-  SearchOutlined,
   ShoppingCartOutlined,
 } from '@ant-design/icons';
 import { projectApi, Project, Task } from '@/api/projects';
@@ -71,12 +70,11 @@ import { cmfVariantApi, type AppearancePartWithCMF, type CMFVariant } from '@/ap
 import { partDrawingApi, PartDrawing } from '@/api/partDrawing';
 import UserSelect from '@/components/UserSelect';
 import CMFVariantEditor from '@/components/CMFVariantEditor';
-import BOMEditableTable, { type BOMItemRecord } from '@/components/BOMEditableTable';
-import EBOMEditableTable from '@/components/EBOMEditableTable';
-import PBOMEditableTable from '@/components/PBOMEditableTable';
+import { EBOMControl, PBOMControl, MBOMControl, type BOMControlConfig } from '@/components/BOM';
 import { ROLE_CODES, taskRoleApi, TaskRole } from '@/constants/roles';
 import type { ColumnsType } from 'antd/es/table';
 import ProcurementControl from '@/components/ProcurementControl';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import dayjs from 'dayjs';
 
 const { Title, Text, Paragraph } = Typography;
@@ -182,6 +180,7 @@ const GanttChart: React.FC<{
   completingTask: boolean;
   onRefresh: () => void;
 }> = ({ tasks, projectId, onCompleteTask: _onCompleteTask, completingTask: _completingTask, onRefresh }) => {
+  const isMobileView = useIsMobile();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
   const [groupBy, setGroupBy] = useState<'phase' | 'none'>('phase');
@@ -322,6 +321,71 @@ const GanttChart: React.FC<{
     }
   });
   const totalHeight = rows.length * GANTT_ROW_HEIGHT;
+
+  // ===== Mobile: Task List View =====
+  if (isMobileView) {
+    const mobileStatusIcon: Record<string, string> = {
+      completed: '\u2705', in_progress: '\ud83d\udfe2', submitted: '\ud83d\udfe1', reviewing: '\ud83d\udfe1',
+      pending: '\u23f3', unassigned: '\u2b1c', rejected: '\ud83d\udd34',
+    };
+    const mobileGroups = groupedData.filter(g => g.tasks.length > 0);
+
+    return (
+      <div className="gantt-mobile-list">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 4px', marginBottom: 4 }}>
+          <Text type="secondary" style={{ fontSize: 13 }}>{tasks.length} 个任务</Text>
+        </div>
+        {mobileGroups.map(group => {
+          const collapsed = collapsedGroups.has(group.phase);
+          return (
+            <div key={group.phase} className="gantt-mobile-phase">
+              <div
+                className="gantt-mobile-phase-header"
+                onClick={() => toggleGroup(group.phase)}
+              >
+                <RightOutlined className={`gantt-mobile-phase-chevron ${collapsed ? '' : 'expanded'}`} />
+                <Tag color={phaseColors[group.phase] || 'default'} style={{ margin: 0 }}>{group.label}</Tag>
+                <Text type="secondary" style={{ fontSize: 12, marginLeft: 'auto' }}>({group.tasks.length})</Text>
+              </div>
+              {!collapsed && (
+                <div className="gantt-mobile-phase-body">
+                  {group.tasks.map(task => {
+                    const config = taskStatusConfig[task.status] || taskStatusConfig.pending;
+                    const icon = mobileStatusIcon[task.status] || '\u23f3';
+                    const startStr = task.start_date ? dayjs(task.start_date).format('M/D') : '';
+                    const endStr = task.due_date ? dayjs(task.due_date).format('M/D') : '';
+                    const dateRange = startStr && endStr ? `${startStr}-${endStr}` : (startStr || endStr || '');
+                    const hasChildren = task.children.length > 0;
+                    const isCollapsed = collapsedTasks.has(task.id);
+                    return (
+                      <div key={task.id} className="gantt-mobile-task" style={{ paddingLeft: 12 + task.depth * 16 }}>
+                        <div className="gantt-mobile-task-row">
+                          {hasChildren ? (
+                            <span style={{ cursor: 'pointer', width: 18, flexShrink: 0, textAlign: 'center' }} onClick={() => toggleTask(task.id)}>
+                              {isCollapsed ? <RightOutlined style={{ fontSize: 10 }} /> : <DownOutlined style={{ fontSize: 10 }} />}
+                            </span>
+                          ) : <span style={{ width: 18, flexShrink: 0 }} />}
+                          <span style={{ fontSize: 14, flexShrink: 0 }}>{icon}</span>
+                          <span className="gantt-mobile-task-name" style={{ color: task.is_critical ? '#cf1322' : undefined }}>
+                            {task.title}
+                          </span>
+                          <span className="gantt-mobile-task-date">{dateRange}</span>
+                        </div>
+                        {/* Mini progress bar */}
+                        <div className="gantt-mobile-task-progress-track" style={{ marginLeft: 18 + (hasChildren ? 18 : 0) }}>
+                          <div className="gantt-mobile-task-progress-fill" style={{ width: `${task.progress || 0}%`, background: config.barColor }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -493,6 +557,63 @@ const GanttChart: React.FC<{
 // ============ Overview Tab ============
 
 const OverviewTab: React.FC<{ project: Project }> = ({ project }) => {
+  const isMobileOverview = useIsMobile();
+  const statusText = project.status === 'planning' ? '规划中' :
+    project.status === 'active' ? '进行中' :
+    project.status === 'completed' ? '已完成' :
+    project.status === 'on_hold' ? '暂停' : project.status;
+
+  if (isMobileOverview) {
+    const tagClass = project.status === 'active' ? 'ds-tag-processing' :
+      project.status === 'completed' ? 'ds-tag-success' :
+      project.status === 'on_hold' ? 'ds-tag-warning' :
+      project.status === 'cancelled' ? 'ds-tag-danger' : 'ds-tag-default';
+    return (
+      <div className="ds-detail-page" style={{ padding: 0 }}>
+        <div className="ds-detail-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <div className="ds-card-title" style={{ flex: 1 }}>{project.name}</div>
+            <span className={`ds-tag ${tagClass}`}>{statusText}</span>
+          </div>
+          <div className="ds-card-subtitle" style={{ fontFamily: 'monospace' }}>{project.code}</div>
+        </div>
+        <div className="ds-detail-section">
+          <div className="ds-section-title">基本信息</div>
+          <div className="ds-info-row">
+            <span className="ds-info-label">当前阶段</span>
+            <span className="ds-info-value"><Tag color={phaseColors[project.phase]} style={{ margin: 0 }}>{project.phase?.toUpperCase()}</Tag></span>
+          </div>
+          <div className="ds-info-row">
+            <span className="ds-info-label">进度</span>
+            <span className="ds-info-value"><Progress percent={project.progress} size="small" style={{ width: 120 }} /></span>
+          </div>
+          <div className="ds-info-row">
+            <span className="ds-info-label">项目经理</span>
+            <span className="ds-info-value">{project.manager_name || '-'}</span>
+          </div>
+          <div className="ds-info-row">
+            <span className="ds-info-label">开始日期</span>
+            <span className="ds-info-value">{project.start_date ? dayjs(project.start_date).format('YYYY-MM-DD') : '-'}</span>
+          </div>
+          <div className="ds-info-row">
+            <span className="ds-info-label">计划结束</span>
+            <span className="ds-info-value">{project.planned_end ? dayjs(project.planned_end).format('YYYY-MM-DD') : '-'}</span>
+          </div>
+          <div className="ds-info-row">
+            <span className="ds-info-label">关联产品</span>
+            <span className="ds-info-value">{project.product_name || '-'}</span>
+          </div>
+        </div>
+        {project.description && (
+          <div className="ds-detail-section">
+            <div className="ds-section-title">项目描述</div>
+            <div style={{ fontSize: 14, color: 'var(--ds-text-primary)', lineHeight: 1.6 }}>{project.description}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
       <Descriptions column={2} bordered size="small">
@@ -500,12 +621,7 @@ const OverviewTab: React.FC<{ project: Project }> = ({ project }) => {
         <Descriptions.Item label="项目名称"><Text strong>{project.name}</Text></Descriptions.Item>
         <Descriptions.Item label="当前阶段"><Tag color={phaseColors[project.phase]}>{project.phase?.toUpperCase()}</Tag></Descriptions.Item>
         <Descriptions.Item label="状态">
-          <Badge status={statusColors[project.status] as any} text={
-            project.status === 'planning' ? '规划中' :
-            project.status === 'active' ? '进行中' :
-            project.status === 'completed' ? '已完成' :
-            project.status === 'on_hold' ? '暂停' : project.status
-          } />
+          <Badge status={statusColors[project.status] as any} text={statusText} />
         </Descriptions.Item>
         <Descriptions.Item label="进度"><Progress percent={project.progress} size="small" style={{ width: 200 }} /></Descriptions.Item>
         <Descriptions.Item label="项目经理">{project.manager_name || '-'}</Descriptions.Item>
@@ -524,17 +640,12 @@ const OverviewTab: React.FC<{ project: Project }> = ({ project }) => {
 
 const BOM_STATUS_CONFIG: Record<string, { color: string; text: string }> = {
   draft: { color: 'default', text: '草稿' },
+  released: { color: 'success', text: '已发布' },
+  obsolete: { color: 'default', text: '已废弃' },
   pending_review: { color: 'processing', text: '待审批' },
   published: { color: 'success', text: '已发布' },
   rejected: { color: 'error', text: '已驳回' },
   frozen: { color: 'purple', text: '已冻结' },
-};
-
-const BOM_TYPE_CONFIG: Record<string, { label: string }> = {
-  EBOM: { label: '电子BOM' },
-  SBOM: { label: '结构BOM' },
-  MBOM: { label: '制造BOM' },
-  PBOM: { label: '包装BOM' },
 };
 
 // Material Search Modal
@@ -590,6 +701,8 @@ const MaterialSearchModal: React.FC<{
 
 const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
+  const [activeTab, setActiveTab] = useState<string>('EBOM');
   const [selectedBomId, setSelectedBomId] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
@@ -604,12 +717,14 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
   const [exportLoading, setExportLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const [drawingHistoryOpen, setDrawingHistoryOpen] = useState(false);
-  const [drawingHistoryItemId, setDrawingHistoryItemId] = useState<string>('');
-  const [drawingHistoryType, setDrawingHistoryType] = useState<'2D' | '3D'>('2D');
+  const [drawingHistoryItemId, _setDrawingHistoryItemId] = useState<string>('');
+  const [drawingHistoryType, _setDrawingHistoryType] = useState<'2D' | '3D'>('2D');
   const [drawingUploadModalOpen, setDrawingUploadModalOpen] = useState(false);
-  const [drawingUploadItemId, setDrawingUploadItemId] = useState<string>('');
-  const [drawingUploadType, setDrawingUploadType] = useState<'2D' | '3D'>('2D');
+  const [drawingUploadItemId, _setDrawingUploadItemId] = useState<string>('');
+  const [drawingUploadType, _setDrawingUploadType] = useState<'2D' | '3D'>('2D');
   const [drawingChangeDesc, setDrawingChangeDesc] = useState('');
+  const [releaseModalOpen, setReleaseModalOpen] = useState(false);
+  const [releaseNote, setReleaseNote] = useState('');
   const [form] = Form.useForm();
 
   // Fetch BOM list
@@ -635,14 +750,19 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
     retry: false,
   });
 
-  // Auto-select first BOM
-  useEffect(() => {
-    if (bomList.length > 0 && !selectedBomId) {
-      setSelectedBomId(bomList[0].id);
-    }
-  }, [bomList, selectedBomId]);
+  // BOMs filtered by active tab type
+  const filteredBomList = useMemo(() =>
+    bomList.filter(b => b.bom_type === activeTab),
+  [bomList, activeTab]);
 
-  const isEditable = false; // BOM管理选项卡始终为查看模式
+  // Auto-select first BOM of active tab type
+  useEffect(() => {
+    if (filteredBomList.length > 0) {
+      setSelectedBomId(filteredBomList[0].id);
+    } else {
+      setSelectedBomId(null);
+    }
+  }, [filteredBomList]);
 
   // Mutations
   const createMutation = useMutation({
@@ -718,16 +838,6 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
     onError: () => message.error('更新失败'),
   });
 
-  const deleteItemMutation = useMutation({
-    mutationFn: (itemId: string) => projectBomApi.deleteItem(projectId, selectedBomId!, itemId),
-    onSuccess: () => {
-      message.success('已删除');
-      queryClient.invalidateQueries({ queryKey: ['project-bom-detail', projectId, selectedBomId] });
-      queryClient.invalidateQueries({ queryKey: ['project-boms', projectId] });
-    },
-    onError: () => message.error('删除失败'),
-  });
-
   const convertToMBOMMutation = useMutation({
     mutationFn: () => projectBomApi.convertToMBOM(projectId, selectedBomId!),
     onSuccess: () => {
@@ -735,6 +845,29 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
       queryClient.invalidateQueries({ queryKey: ['project-boms', projectId] });
     },
     onError: () => message.error('转换失败'),
+  });
+
+  const releaseMutation = useMutation({
+    mutationFn: (note: string) => projectBomApi.release(projectId, selectedBomId!, note),
+    onSuccess: (bom) => {
+      message.success(`已发布 ${bom.version}`);
+      setReleaseModalOpen(false);
+      setReleaseNote('');
+      queryClient.invalidateQueries({ queryKey: ['project-bom-detail', projectId, selectedBomId] });
+      queryClient.invalidateQueries({ queryKey: ['project-boms', projectId] });
+    },
+    onError: (err: any) => message.error(err?.response?.data?.message || '发布失败'),
+  });
+
+  const createFromMutation = useMutation({
+    mutationFn: ({ sourceBomId, targetType }: { sourceBomId: string; targetType: string }) =>
+      projectBomApi.createFrom(projectId, sourceBomId, targetType),
+    onSuccess: (bom) => {
+      message.success(`已创建${bom.bom_type}草稿`);
+      setActiveTab(bom.bom_type);
+      queryClient.invalidateQueries({ queryKey: ['project-boms', projectId] });
+    },
+    onError: (err: any) => message.error(err?.response?.data?.message || '创建失败'),
   });
 
   const submitToSRMMutation = useMutation({
@@ -801,18 +934,6 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
     }
   };
 
-  // Add new empty row
-  const handleAddRow = () => {
-    const items = bomDetail?.items || [];
-    addItemMutation.mutate({
-      name: '新物料',
-      quantity: 1,
-      unit: 'pcs',
-      item_number: items.length + 1,
-      procurement_type: 'buy',
-    });
-  };
-
   // Select material from library
   const handleMaterialSelect = (material: Material) => {
     if (editingRowId) {
@@ -841,78 +962,6 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
     setEditingRowId(null);
   };
 
-  // BOM cell save via shared component
-  const handleItemSave = (itemId: string, field: string, value: any) => {
-    const record = items.find(i => i.id === itemId);
-    if (!record) return;
-    const data: any = {
-      name: record.name,
-      quantity: record.quantity,
-      unit: record.unit,
-    };
-    data[field] = value;
-    if (field === 'quantity' || field === 'unit_price') {
-      const qty = field === 'quantity' ? value : record.quantity;
-      const price = field === 'unit_price' ? value : record.unit_price;
-      if (qty != null && price != null) {
-        data.extended_cost = qty * price;
-      }
-    }
-    updateItemMutation.mutate({ itemId, data });
-  };
-
-  // Drawing column renderer using PartDrawing version system, fallback to inline fields
-  const renderDrawingCol = (record: BOMItemRecord, type: '2D' | '3D') => {
-    const latest = getLatestDrawing(record.id, type);
-    const count = getDrawingCount(record.id, type);
-    // Fallback: show inline drawing fields from BOM item when no PartDrawing record exists
-    const inlineFileName = type === '3D' ? record.drawing_3d_file_name : record.drawing_2d_file_name;
-    return (
-      <Space size={4}>
-        {latest ? (
-          <Tooltip title={latest.file_name}>
-            <a href={latest.file_url} target="_blank" rel="noreferrer" style={{ fontSize: 11 }}>
-              {latest.version} {latest.file_name.length > 8 ? latest.file_name.slice(0, 8) + '...' : latest.file_name}
-            </a>
-          </Tooltip>
-        ) : inlineFileName ? (
-          <Tooltip title={inlineFileName}>
-            <Text style={{ fontSize: 11 }}>
-              {inlineFileName.length > 12 ? inlineFileName.slice(0, 12) + '...' : inlineFileName}
-            </Text>
-          </Tooltip>
-        ) : <Text type="secondary" style={{ fontSize: 11 }}>-</Text>}
-        {isEditable && (
-          <UploadOutlined
-            style={{ color: '#1677ff', cursor: 'pointer', fontSize: 12 }}
-            onClick={() => { setDrawingUploadItemId(record.id); setDrawingUploadType(type); setDrawingUploadModalOpen(true); }}
-          />
-        )}
-        {count > 0 && (
-          <Tooltip title="查看历史版本">
-            <HistoryOutlined
-              style={{ color: '#8c8c8c', cursor: 'pointer', fontSize: 12 }}
-              onClick={() => { setDrawingHistoryItemId(record.id); setDrawingHistoryType(type); setDrawingHistoryOpen(true); }}
-            />
-          </Tooltip>
-        )}
-      </Space>
-    );
-  };
-
-  // Action column for BOM table
-  const renderBOMActionCol = isEditable ? (record: BOMItemRecord) => (
-    <Space size={4}>
-      <Tooltip title="从物料库选择">
-        <Button size="small" type="text" icon={<SearchOutlined />}
-          onClick={() => { setEditingRowId(record.id); setMaterialModalOpen(true); }} />
-      </Tooltip>
-      <Popconfirm title="确认删除此行？" onConfirm={() => deleteItemMutation.mutate(record.id)}>
-        <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-      </Popconfirm>
-    </Space>
-  ) : undefined;
-
   // 新版图纸上传：创建PartDrawing版本记录
   const handleDrawingVersionUpload = async (file: File) => {
     try {
@@ -934,40 +983,28 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
     return false;
   };
 
-  // 获取某item某类型的最新图纸
-  const getLatestDrawing = (itemId: string, type: '2D' | '3D'): PartDrawing | undefined => {
-    const itemDrawings = drawingsByBOM[itemId];
-    if (!itemDrawings) return undefined;
-    const list = itemDrawings[type];
-    return list && list.length > 0 ? list[0] : undefined;
-  };
-
-  // 获取某item某类型的图纸数量
-  const getDrawingCount = (itemId: string, type: '2D' | '3D'): number => {
-    const itemDrawings = drawingsByBOM[itemId];
-    if (!itemDrawings) return 0;
-    return itemDrawings[type]?.length || 0;
-  };
-
   const bomType = bomDetail?.bom_type || 'EBOM';
 
-  // Stats
-  const items = bomDetail?.items || [];
+  // Stats — flatten extended_attrs for table compatibility
+  // Strip GORM relation objects to prevent React error #31 (objects as children)
+  // Extract material_code from the relation object before stripping
+  const items = (bomDetail?.items || []).map(({ material, children, ...rest }) => ({
+    ...rest,
+    ...(rest.extended_attrs || {}),
+    material_code: material?.code || '',
+  }));
   const totalItems = items.length;
   const totalCost = items.reduce((sum, item) => {
     const cost = item.extended_cost ?? (item.quantity && item.unit_price ? item.quantity * item.unit_price : 0);
     return sum + (cost || 0);
   }, 0);
-  const criticalCount = items.filter(i => i.is_critical).length;
-  // SBOM stats
-  const isSBOM = bomType === 'SBOM';
-  const appearanceCount = items.filter(i => i.is_appearance_part).length;
-  const totalWeight = items.reduce((sum, item) => sum + (item.weight_grams || 0), 0);
+  // PBOM stats
+  const isPBOM = bomType === 'PBOM';
   const totalTargetPrice = items.reduce((sum, item) => {
-    const price = item.target_price || 0;
+    const price = Number(item.extended_attrs?.target_price) || 0;
     return sum + price * (item.quantity || 1);
   }, 0);
-  const totalTooling = items.reduce((sum, item) => sum + (item.tooling_estimate || 0), 0);
+  const totalTooling = items.reduce((sum, item) => sum + (Number(item.extended_attrs?.tooling_estimate) || 0), 0);
 
   // Action buttons based on status
   const renderActions = () => {
@@ -1035,62 +1072,124 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
     );
   };
 
+  // Full config for readonly display (show all categories)
+  const fullConfig: BOMControlConfig = useMemo(() => ({
+    bom_type: activeTab as 'EBOM' | 'PBOM' | 'MBOM',
+    visible_categories: [],
+    category_config: {},
+  }), [activeTab]);
+
   return (
     <div>
-      {/* Top: BOM selector + create */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <Space>
-          <Text strong style={{ fontSize: 15 }}>BOM管理</Text>
-          {bomList.length > 0 && (
-            <Select
-              value={selectedBomId || undefined}
-              onChange={setSelectedBomId}
-              style={{ width: 260 }}
-              placeholder="选择BOM"
-              loading={listLoading}
-              options={bomList.map(b => ({
-                label: `${b.name} (${BOM_TYPE_CONFIG[b.bom_type]?.label || b.bom_type} ${b.version})`,
-                value: b.id,
-              }))}
-            />
-          )}
-        </Space>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+      {/* Top: Tabs + BOM selector + create */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <Text strong style={{ fontSize: isMobile ? 14 : 15 }}>BOM管理</Text>
+        <Button type="primary" size={isMobile ? 'small' : undefined} icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
           新建BOM
         </Button>
       </div>
+      <Tabs
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key)}
+        size={isMobile ? 'small' : undefined}
+        items={isMobile ? [
+          { key: 'EBOM', label: 'EBOM' },
+          { key: 'PBOM', label: 'PBOM' },
+          { key: 'MBOM', label: 'MBOM' },
+        ] : [
+          { key: 'EBOM', label: 'EBOM 工程BOM' },
+          { key: 'PBOM', label: 'PBOM 生产BOM' },
+          { key: 'MBOM', label: 'MBOM 制造BOM' },
+        ]}
+        style={{ marginBottom: 8 }}
+      />
+      {filteredBomList.length > 1 && (
+        <div style={{ marginBottom: 12 }}>
+          <Select
+            value={selectedBomId || undefined}
+            onChange={setSelectedBomId}
+            style={{ width: isMobile ? '100%' : 300 }}
+            placeholder="选择BOM版本"
+            loading={listLoading}
+            options={filteredBomList.map(b => ({
+              label: `${b.bom_type} ${b.version || '草稿'}${b.status === 'obsolete' ? ' (已废弃)' : b.status === 'released' ? ' (当前)' : ''}`,
+              value: b.id,
+            }))}
+          />
+        </div>
+      )}
 
-      {/* BOM Info Card */}
-      {bomDetail && (
+      {/* Create from upstream buttons when no BOM of this type exists */}
+      {!listLoading && filteredBomList.length === 0 && activeTab === 'PBOM' && (() => {
+        const releasedEbom = bomList.find(b => b.bom_type === 'EBOM' && b.status === 'released');
+        return releasedEbom ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <Empty description="暂无PBOM" />
+            <Button
+              type="primary"
+              style={{ marginTop: 16 }}
+              loading={createFromMutation.isPending}
+              onClick={() => createFromMutation.mutate({ sourceBomId: releasedEbom.id, targetType: 'PBOM' })}
+            >
+              从 EBOM {releasedEbom.version} 创建 PBOM
+            </Button>
+          </div>
+        ) : null;
+      })()}
+      {!listLoading && filteredBomList.length === 0 && activeTab === 'MBOM' && (() => {
+        const releasedPbom = bomList.find(b => b.bom_type === 'PBOM' && b.status === 'released');
+        return releasedPbom ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <Empty description="暂无MBOM" />
+            <Button
+              type="primary"
+              style={{ marginTop: 16 }}
+              loading={createFromMutation.isPending}
+              onClick={() => createFromMutation.mutate({ sourceBomId: releasedPbom.id, targetType: 'MBOM' })}
+            >
+              从 PBOM {releasedPbom.version} 创建 MBOM
+            </Button>
+          </div>
+        ) : null;
+      })()}
+
+      {/* Version Info Bar */}
+      {bomDetail && !isMobile && (
         <Card size="small" style={{ marginBottom: 12 }} styles={{ body: { padding: '10px 16px' } }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <Space size={16}>
+              {/* Status + Version */}
               <div>
-                <Text strong style={{ fontSize: 15 }}>{bomDetail.name}</Text>
-                <div style={{ marginTop: 2 }}>
-                  <Space size={8}>
-                    <Tag>{BOM_TYPE_CONFIG[bomDetail.bom_type]?.label || bomDetail.bom_type}</Tag>
-                    <Tag>{bomDetail.version}</Tag>
-                    <Tag color={BOM_STATUS_CONFIG[bomDetail.status]?.color}>
-                      {BOM_STATUS_CONFIG[bomDetail.status]?.text || bomDetail.status}
-                    </Tag>
-                  </Space>
-                </div>
+                <Space size={8}>
+                  <Tag color={BOM_STATUS_CONFIG[bomDetail.status]?.color} style={{ fontSize: 13 }}>
+                    {BOM_STATUS_CONFIG[bomDetail.status]?.text || bomDetail.status}
+                  </Tag>
+                  <Text strong style={{ fontSize: 15 }}>
+                    {bomDetail.bom_type} {bomDetail.version || '-'}
+                  </Text>
+                </Space>
+                {bomDetail.status === 'released' && bomDetail.released_at && (
+                  <div style={{ marginTop: 2 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {bomDetail.creator?.name || ''} 发布于 {dayjs(bomDetail.released_at).format('YYYY-MM-DD HH:mm')}
+                    </Text>
+                  </div>
+                )}
+                {bomDetail.source_version && (
+                  <div style={{ marginTop: 2 }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      来源: {bomDetail.source_version}
+                    </Text>
+                  </div>
+                )}
               </div>
+              {/* Stats */}
               <div style={{ borderLeft: '1px solid #f0f0f0', paddingLeft: 16 }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>{isSBOM ? '零件数' : '物料数'}</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{isPBOM ? '零件数' : '物料数'}</Text>
                 <div><Text strong>{totalItems}</Text></div>
               </div>
-              {isSBOM ? (
+              {isPBOM ? (
                 <>
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>外观件</Text>
-                    <div><Text strong style={{ color: appearanceCount > 0 ? '#1677ff' : undefined }}>{appearanceCount}</Text></div>
-                  </div>
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>总重量</Text>
-                    <div><Text strong>{totalWeight.toFixed(1)}g</Text></div>
-                  </div>
                   <div>
                     <Text type="secondary" style={{ fontSize: 12 }}>目标成本</Text>
                     <div><Text strong style={{ color: '#cf1322', fontSize: 16 }}>¥{totalTargetPrice.toFixed(2)}</Text></div>
@@ -1101,27 +1200,42 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
                   </div>
                 </>
               ) : (
-                <>
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>总成本</Text>
-                    <div><Text strong style={{ color: '#cf1322', fontSize: 16 }}>¥{totalCost.toFixed(2)}</Text></div>
-                  </div>
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>关键件</Text>
-                    <div><Text strong style={{ color: criticalCount > 0 ? '#cf1322' : undefined }}>{criticalCount}</Text></div>
-                  </div>
-                </>
-              )}
-              {bomDetail.creator && (
                 <div>
-                  <Text type="secondary" style={{ fontSize: 12 }}>创建者</Text>
-                  <div><Text>{bomDetail.creator.name}</Text></div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>总成本</Text>
+                  <div><Text strong style={{ color: '#cf1322', fontSize: 16 }}>¥{totalCost.toFixed(2)}</Text></div>
                 </div>
               )}
             </Space>
-            {renderActions()}
+            <Space>
+              {/* Release button for draft */}
+              {bomDetail.status === 'draft' && totalItems > 0 && (
+                <Button type="primary" onClick={() => setReleaseModalOpen(true)}>
+                  发布 {bomDetail.bom_type}
+                </Button>
+              )}
+              {renderActions()}
+            </Space>
           </div>
         </Card>
+      )}
+      {/* Mobile: compact summary line */}
+      {bomDetail && isMobile && (
+        <div className="bom-mobile-summary">
+          <Tag color={BOM_STATUS_CONFIG[bomDetail.status]?.color} style={{ margin: 0 }}>
+            {BOM_STATUS_CONFIG[bomDetail.status]?.text || bomDetail.status}
+          </Tag>
+          <span className="bom-mobile-summary-stat">
+            <span className="value">{bomDetail.version || '草稿'}</span>
+          </span>
+          <span className="bom-mobile-summary-stat">
+            <span className="label">{isPBOM ? '零件' : '物料'}</span>
+            <span className="value">{totalItems}</span>
+          </span>
+          <span className="bom-mobile-summary-stat">
+            <span className="label">成本</span>
+            <span className="cost">¥{(isPBOM ? totalTargetPrice : totalCost).toFixed(0)}</span>
+          </span>
+        </div>
       )}
 
       {/* Loading state */}
@@ -1130,81 +1244,75 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
       )}
 
       {/* Empty state */}
-      {!listLoading && bomList.length === 0 && (
-        <Empty description="暂无BOM，请新建" style={{ padding: 60 }} />
+      {!listLoading && filteredBomList.length === 0 && (
+        <Empty description={`暂无${activeTab}，请新建`} style={{ padding: 60 }} />
       )}
 
-      {/* Editable Table */}
+      {/* BOM Content: new controls in readonly mode */}
       {bomDetail && (
         <>
-          {bomType === 'EBOM' ? (
-            <EBOMEditableTable
-              items={items}
+          {activeTab === 'EBOM' && (
+            <EBOMControl
+              config={fullConfig}
+              value={items}
               onChange={() => {}}
-              mode={isEditable ? 'edit' : 'view'}
-              onItemSave={handleItemSave}
-            />
-          ) : bomType === 'PBOM' ? (
-            <PBOMEditableTable
-              items={items}
-              onChange={() => {}}
-              mode={isEditable ? 'edit' : 'view'}
-              onItemSave={handleItemSave}
-            />
-          ) : (
-            <BOMEditableTable
-              bomType={bomType as 'EBOM' | 'SBOM'}
-              items={items}
-              onChange={() => {}}
-              showAddDelete={false}
-              readonly={!isEditable}
+              readonly
               showMaterialCode
-              onItemSave={handleItemSave}
-              onMaterialSearch={(itemId) => { setEditingRowId(itemId); setMaterialModalOpen(true); }}
-              renderDrawingColumn={isSBOM ? renderDrawingCol : undefined}
-              actionColumn={renderBOMActionCol}
-              scrollX={isSBOM ? 2300 : 1800}
-              scrollY={450}
-              noPagination
-              rowClassName={(record) => record.is_critical ? 'critical-row' : ''}
             />
           )}
-
-          {/* Bottom: add row button + stats */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, padding: '8px 0', borderTop: '1px solid #f0f0f0' }}>
-            <div>
-              {isEditable && (
-                <Space>
-                  <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddRow}
-                    loading={addItemMutation.isPending}>
-                    添加物料
-                  </Button>
-                  <Button type="dashed" icon={<SearchOutlined />} onClick={() => { setEditingRowId(null); setMaterialModalOpen(true); }}>
-                    从物料库选择
-                  </Button>
-                </Space>
-              )}
-            </div>
-            <Space size={24}>
-              <Text type="secondary">共 <Text strong>{totalItems}</Text> 项{isSBOM ? '零件' : '物料'}</Text>
-              {isSBOM ? (
-                <>
-                  <Text type="secondary">外观件 <Text strong style={{ color: appearanceCount > 0 ? '#1677ff' : undefined }}>{appearanceCount}</Text> 项</Text>
-                  <Text type="secondary">总重量 <Text strong>{totalWeight.toFixed(1)}g</Text></Text>
-                  <Text>目标成本合计 <Text strong style={{ color: '#cf1322', fontSize: 18 }}>¥{totalTargetPrice.toFixed(2)}</Text></Text>
-                  <Text>模具费合计 <Text strong style={{ color: '#cf1322', fontSize: 18 }}>¥{totalTooling.toFixed(2)}</Text></Text>
-                </>
-              ) : (
-                <>
-                  <Text type="secondary">关键件 <Text strong style={{ color: criticalCount > 0 ? '#cf1322' : undefined }}>{criticalCount}</Text> 项</Text>
-                  <Text>
-                    总成本 <Text strong style={{ color: '#cf1322', fontSize: 18 }}>¥{totalCost.toFixed(2)}</Text>
-                  </Text>
-                </>
-              )}
-            </Space>
-          </div>
+          {activeTab === 'PBOM' && (
+            <PBOMControl
+              config={fullConfig}
+              value={items}
+              onChange={() => {}}
+              readonly
+              showMaterialCode
+            />
+          )}
+          {activeTab === 'MBOM' && (
+            <MBOMControl
+              config={fullConfig}
+              value={items}
+              onChange={() => {}}
+              readonly
+              showMaterialCode
+            />
+          )}
         </>
+      )}
+
+      {/* Mobile bottom action bar */}
+      {isMobile && bomDetail && (
+        <div className="bom-mobile-action-bar">
+          {(bomDetail.status === 'draft' || bomDetail.status === 'rejected') && (
+            <Button type="primary" size="small" icon={<SendOutlined />}
+              loading={submitMutation.isPending}
+              onClick={() => submitMutation.mutate()}>
+              提交审批
+            </Button>
+          )}
+          {bomDetail.status === 'pending_review' && (
+            <>
+              <Button type="primary" size="small" style={{ background: '#52c41a', borderColor: '#52c41a' }}
+                icon={<CheckCircleOutlined />} loading={approveMutation.isPending}
+                onClick={() => approveMutation.mutate()}>
+                通过
+              </Button>
+              <Button danger size="small" icon={<CloseCircleOutlined />}
+                onClick={() => setRejectModalOpen(true)}>
+                驳回
+              </Button>
+            </>
+          )}
+          {bomDetail.status === 'draft' && totalItems > 0 && (
+            <Button type="primary" size="small" onClick={() => setReleaseModalOpen(true)}>
+              发布
+            </Button>
+          )}
+          <Button size="small" icon={<DownloadOutlined />} loading={exportLoading} onClick={handleExportExcel}>
+            导出
+          </Button>
+        </div>
       )}
 
       {/* Create BOM Modal */}
@@ -1215,25 +1323,40 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
         onOk={() => form.submit()}
         confirmLoading={createMutation.isPending}
       >
-        <Form form={form} layout="vertical" onFinish={(values) => createMutation.mutate(values)}>
-          <Form.Item name="name" label="BOM名称" rules={[{ required: true, message: '请输入BOM名称' }]}>
-            <Input placeholder="如：EVT电子BOM" />
-          </Form.Item>
-          <Form.Item name="bom_type" label="BOM类型" rules={[{ required: true, message: '请选择BOM类型' }]}>
+        <Form form={form} layout="vertical" onFinish={(values) => createMutation.mutate({ ...values, name: values.bom_type })}>
+          <Form.Item name="bom_type" label="BOM类型" initialValue={activeTab} rules={[{ required: true, message: '请选择BOM类型' }]}>
             <Select options={[
-              { label: 'EBOM - 电子BOM', value: 'EBOM' },
-              { label: 'SBOM - 结构BOM', value: 'SBOM' },
-              { label: 'PBOM - 包装BOM', value: 'PBOM' },
+              { label: 'EBOM - 工程BOM', value: 'EBOM' },
+              { label: 'PBOM - 生产BOM', value: 'PBOM' },
               { label: 'MBOM - 制造BOM', value: 'MBOM' },
             ]} />
           </Form.Item>
-          <Form.Item name="version" label="版本号" initialValue="v1.0">
-            <Input placeholder="如：v1.0" />
-          </Form.Item>
           <Form.Item name="description" label="描述">
-            <Input.TextArea rows={3} placeholder="BOM描述信息" />
+            <Input.TextArea rows={3} placeholder="BOM描述信息（可选）" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* Release BOM Modal */}
+      <Modal
+        title={`发布 ${bomDetail?.bom_type || ''}`}
+        open={releaseModalOpen}
+        onCancel={() => { setReleaseModalOpen(false); setReleaseNote(''); }}
+        onOk={() => releaseMutation.mutate(releaseNote)}
+        confirmLoading={releaseMutation.isPending}
+        okText="确认发布"
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Text type="secondary">
+            发布后BOM将不可编辑，系统会自动分配版本号。
+          </Text>
+        </div>
+        <Input.TextArea
+          rows={3}
+          placeholder="请输入发布说明..."
+          value={releaseNote}
+          onChange={(e) => setReleaseNote(e.target.value)}
+        />
       </Modal>
 
       {/* Reject Modal */}
@@ -1283,7 +1406,7 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
               value={compareBom1}
               onChange={setCompareBom1}
               options={bomList.map(b => ({
-                label: `${b.name} (${BOM_TYPE_CONFIG[b.bom_type]?.label || b.bom_type} ${b.version})`,
+                label: `${b.bom_type} ${b.version || '草稿'}`,
                 value: b.id,
               }))}
             />
@@ -1296,7 +1419,7 @@ const BOMTab: React.FC<{ projectId: string }> = ({ projectId }) => {
               value={compareBom2}
               onChange={setCompareBom2}
               options={bomList.map(b => ({
-                label: `${b.name} (${BOM_TYPE_CONFIG[b.bom_type]?.label || b.bom_type} ${b.version})`,
+                label: `${b.bom_type} ${b.version || '草稿'}`,
                 value: b.id,
               }))}
             />
@@ -1694,6 +1817,7 @@ const FormSubmissionDisplay: React.FC<{ projectId: string; taskId: string }> = (
   const [submission, setSubmission] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [userMap, setUserMap] = useState<Record<string, string>>({});
+  const isMobileForm = useIsMobile();
 
   React.useEffect(() => {
     Promise.all([
@@ -1719,79 +1843,87 @@ const FormSubmissionDisplay: React.FC<{ projectId: string; taskId: string }> = (
   const fields = formDef.fields || [];
   const data = submission.data || {};
 
+  const renderFieldValue = (field: any) => {
+    let value = data[field.key];
+    // Complex types: render as full-width blocks
+    if (field.type === 'bom_upload' && value && typeof value === 'object' && value.items) {
+      return { key: field.key, label: field.label, complex: true, node: <BOMSubmissionDisplay data={value} /> };
+    }
+    if (['ebom_control', 'pbom_control', 'mbom_control'].includes(field.type) && Array.isArray(value)) {
+      const BOMControl = field.type === 'ebom_control' ? EBOMControl : field.type === 'pbom_control' ? PBOMControl : MBOMControl;
+      return { key: field.key, label: field.label, complex: true, node: <BOMControl config={(field.config || {}) as BOMControlConfig} value={value} onChange={() => {}} readonly /> };
+    }
+    if ((field.type === 'tooling_list' || field.type === 'consumable_list') && value && typeof value === 'object' && value.items) {
+      const listTitle = field.type === 'tooling_list' ? '治具清单' : '组装辅料清单';
+      const listItems = (value.items || []) as Array<{ name: string; unit: string; quantity: number; unit_price: number }>;
+      return { key: field.key, label: field.label, complex: true, node: (
+        <div>
+          <Tag color="blue">{value.item_count || listItems.length} 项</Tag>
+          <Text type="secondary" style={{ fontSize: 12 }}>{listTitle}</Text>
+          {listItems.length > 0 && (
+            <Table size="small" dataSource={listItems} rowKey={(_, idx) => String(idx)} pagination={false} style={{ marginTop: 8 }}
+              columns={[
+                { title: '序号', width: 55, align: 'center' as const, render: (_, __, idx) => idx + 1 },
+                { title: '名称', dataIndex: 'name', width: 200 },
+                { title: '单位', dataIndex: 'unit', width: 80 },
+                { title: '数量', dataIndex: 'quantity', width: 100, align: 'right' as const },
+                { title: '单价', dataIndex: 'unit_price', width: 100, align: 'right' as const },
+              ]}
+            />
+          )}
+        </div>
+      )};
+    }
+    if (field.type === 'procurement_control' && value && typeof value === 'object') {
+      return { key: field.key, label: field.label, complex: true, node: <ProcurementControl value={value} /> };
+    }
+    // Simple types: format value string
+    if (value === undefined || value === null) value = '-';
+    else if (field.type === 'role_assignment' && typeof value === 'object' && !Array.isArray(value)) {
+      value = Object.entries(value as Record<string, string>).map(([code, uid]) => `${code}: ${userMap[uid] || uid}`).join('; ') || '-';
+    }
+    else if (field.type === 'user') value = userMap[value] || value;
+    else if (typeof value === 'boolean') value = value ? '是' : '否';
+    else if (Array.isArray(value)) {
+      value = value.length > 0 && typeof value[0] === 'object' && value[0].filename
+        ? value.map((f: any) => f.filename).join(', ') : value.join(', ');
+    }
+    return { key: field.key, label: field.label, complex: false, text: String(value) };
+  };
+
+  const renderedFields = fields.map(renderFieldValue);
+
+  if (isMobileForm) {
+    return (
+      <div className="ds-detail-section" style={{ marginTop: 8 }}>
+        <div className="ds-section-title">已提交的表单数据</div>
+        {renderedFields.map((f: any) => f.complex ? (
+          <div key={f.key} style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--ds-text-secondary)', marginBottom: 4 }}>{f.label}</div>
+            {f.node}
+          </div>
+        ) : (
+          <div key={f.key} className="ds-info-row">
+            <span className="ds-info-label">{f.label}</span>
+            <span className="ds-info-value">{f.text}</span>
+          </div>
+        ))}
+        <div style={{ fontSize: 11, color: 'var(--ds-text-secondary)', marginTop: 8 }}>
+          提交时间: {submission.submitted_at ? dayjs(submission.submitted_at).format('YYYY-MM-DD HH:mm') : '-'}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ background: '#fafafa', padding: 12, borderRadius: 6, marginTop: 8 }}>
       <Text strong style={{ fontSize: 13, marginBottom: 8, display: 'block' }}>已提交的表单数据</Text>
       <Descriptions size="small" column={2} bordered>
-        {fields.map((field: any) => {
-          let value = data[field.key];
-          // bom_upload: show filename + count + expandable table
-          if (field.type === 'bom_upload' && value && typeof value === 'object' && value.items) {
-            return (
-              <Descriptions.Item key={field.key} label={field.label} span={2}>
-                <BOMSubmissionDisplay data={value} />
-              </Descriptions.Item>
-            );
-          }
-          // tooling_list / consumable_list: readonly table
-          if ((field.type === 'tooling_list' || field.type === 'consumable_list') && value && typeof value === 'object' && value.items) {
-            const listTitle = field.type === 'tooling_list' ? '治具清单' : '组装辅料清单';
-            const listItems = (value.items || []) as Array<{ name: string; unit: string; quantity: number; unit_price: number }>;
-            return (
-              <Descriptions.Item key={field.key} label={field.label} span={2}>
-                <div>
-                  <Tag color="blue">{value.item_count || listItems.length} 项</Tag>
-                  <Text type="secondary" style={{ fontSize: 12 }}>{listTitle}</Text>
-                  {listItems.length > 0 && (
-                    <Table
-                      size="small"
-                      dataSource={listItems}
-                      rowKey={(_, idx) => String(idx)}
-                      pagination={false}
-                      style={{ marginTop: 8 }}
-                      columns={[
-                        { title: '序号', width: 55, align: 'center' as const, render: (_, __, idx) => idx + 1 },
-                        { title: '名称', dataIndex: 'name', width: 200 },
-                        { title: '单位', dataIndex: 'unit', width: 80 },
-                        { title: '数量', dataIndex: 'quantity', width: 100, align: 'right' as const },
-                        { title: '单价', dataIndex: 'unit_price', width: 100, align: 'right' as const },
-                      ]}
-                    />
-                  )}
-                </div>
-              </Descriptions.Item>
-            );
-          }
-          // procurement_control: show PR info
-          if (field.type === 'procurement_control' && value && typeof value === 'object') {
-            return (
-              <Descriptions.Item key={field.key} label={field.label} span={2}>
-                <ProcurementControl value={value} />
-              </Descriptions.Item>
-            );
-          }
-          if (value === undefined || value === null) value = '-';
-          else if (field.type === 'role_assignment' && typeof value === 'object' && !Array.isArray(value)) {
-            const lines = Object.entries(value as Record<string, string>)
-              .map(([code, uid]) => `${code}: ${userMap[uid] || uid}`)
-              .join('; ');
-            value = lines || '-';
-          }
-          else if (field.type === 'user') value = userMap[value] || value;
-          else if (typeof value === 'boolean') value = value ? '是' : '否';
-          else if (Array.isArray(value)) {
-            if (value.length > 0 && typeof value[0] === 'object' && value[0].filename) {
-              value = value.map((f: any) => f.filename).join(', ');
-            } else {
-              value = value.join(', ');
-            }
-          }
-          return (
-            <Descriptions.Item key={field.key} label={field.label}>
-              {String(value)}
-            </Descriptions.Item>
-          );
-        })}
+        {renderedFields.map((f: any) => f.complex ? (
+          <Descriptions.Item key={f.key} label={f.label} span={2}>{f.node}</Descriptions.Item>
+        ) : (
+          <Descriptions.Item key={f.key} label={f.label}>{f.text}</Descriptions.Item>
+        ))}
       </Descriptions>
       <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
         提交时间: {submission.submitted_at ? dayjs(submission.submitted_at).format('YYYY-MM-DD HH:mm') : '-'}
@@ -2317,11 +2449,11 @@ const SKUTab: React.FC<{ projectId: string }> = ({ projectId }) => {
     queryFn: () => skuApi.listSKUs(projectId),
   });
 
-  // Get SBOM items for create modal
+  // Get PBOM items for create modal
   const { data: bomItems = [] } = useQuery({
-    queryKey: ['project-sbom-items', projectId],
+    queryKey: ['project-pbom-items', projectId],
     queryFn: async () => {
-      const boms = await projectBomApi.list(projectId, { bom_type: 'SBOM' });
+      const boms = await projectBomApi.list(projectId, { bom_type: 'PBOM' });
       if (boms.length === 0) return [];
       const detail = await projectBomApi.get(projectId, boms[0].id);
       return detail.items || [];
@@ -2345,7 +2477,7 @@ const SKUTab: React.FC<{ projectId: string }> = ({ projectId }) => {
 
   // Split BOM items into non-appearance and appearance
   const nonAppearanceItems = useMemo(() =>
-    bomItems.filter((item: ProjectBOMItem) => !item.is_appearance_part && !item.is_variant),
+    bomItems.filter((item: ProjectBOMItem) => !item.extended_attrs?.is_appearance_part && !item.extended_attrs?.is_variant),
   [bomItems]);
 
   // Initialize non-appearance checkboxes when modal opens
@@ -2519,7 +2651,7 @@ const SKUTab: React.FC<{ projectId: string }> = ({ projectId }) => {
                     }}
                   />
                   <Text style={{ fontSize: 13 }}>#{item.item_number} {item.name}</Text>
-                  {item.material_type && <Tag style={{ fontSize: 11 }}>{item.material_type}</Tag>}
+                  {item.extended_attrs?.material_type && <Tag style={{ fontSize: 11 }}>{item.extended_attrs.material_type}</Tag>}
                 </div>
               ))}
             </div>
@@ -2537,7 +2669,7 @@ const SKUTab: React.FC<{ projectId: string }> = ({ projectId }) => {
                 return (
                   <div key={item.id} style={{ marginBottom: 12 }}>
                     <Text strong style={{ fontSize: 13 }}>#{item.item_number} {item.name}</Text>
-                    {item.material_type && <Tag style={{ fontSize: 11, marginLeft: 6 }}>{item.material_type}</Tag>}
+                    {item.extended_attrs?.material_type && <Tag style={{ fontSize: 11, marginLeft: 6 }}>{item.extended_attrs.material_type}</Tag>}
                     {variants.length === 0 ? (
                       <div style={{ padding: '4px 0', color: '#999', fontSize: 12 }}>暂无CMF方案</div>
                     ) : (
@@ -2576,6 +2708,7 @@ const ProjectDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const isMobileView = useIsMobile();
 
   const { data: project, isLoading } = useQuery({
     queryKey: ['project', id],
@@ -2641,17 +2774,19 @@ const ProjectDetail: React.FC = () => {
   }
 
   return (
-    <div style={{ padding: 24 }}>
+    <div style={{ padding: isMobileView ? 12 : 24 }}>
       {/* Header */}
-      <div style={{ marginBottom: 24 }}>
-        <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => navigate('/projects')} style={{ padding: 0, marginBottom: 8 }}>
-          返回项目列表
-        </Button>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <Title level={3} style={{ margin: 0 }}>
+      <div style={{ marginBottom: isMobileView ? 12 : 24 }}>
+        {!isMobileView && (
+          <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => navigate('/projects')} style={{ padding: 0, marginBottom: 8 }}>
+            返回项目列表
+          </Button>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobileView ? 'center' : 'flex-start', flexWrap: isMobileView ? 'wrap' : 'nowrap', gap: isMobileView ? 8 : 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <Title level={isMobileView ? 4 : 3} style={{ margin: 0 }}>
               {project.name}
-              {project.code && <Text code style={{ marginLeft: 12, fontSize: 14 }}>{project.code}</Text>}
+              {project.code && <Text code style={{ marginLeft: 8, fontSize: isMobileView ? 12 : 14 }}>{project.code}</Text>}
             </Title>
             <div style={{ marginTop: 8 }}>
               <PhaseProgressBar currentPhase={project.phase} />
@@ -2670,9 +2805,11 @@ const ProjectDetail: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <Card>
+      <Card bodyStyle={{ padding: isMobileView ? 8 : undefined }}>
         <Tabs
           defaultActiveKey="overview"
+          tabBarGutter={isMobileView ? 8 : undefined}
+          size={isMobileView ? 'small' : undefined}
           items={[
             {
               key: 'overview',

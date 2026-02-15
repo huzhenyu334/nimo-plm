@@ -239,6 +239,48 @@ func (h *BOMHandler) DeleteItem(c *gin.Context) {
 	Success(c, gin.H{"deleted": true})
 }
 
+// ReleaseBOM POST /projects/:id/boms/:bomId/release
+func (h *BOMHandler) ReleaseBOM(c *gin.Context) {
+	bomID := c.Param("bomId")
+	userID := c.GetString("user_id")
+
+	var input struct {
+		ReleaseNote string `json:"release_note"`
+	}
+	c.ShouldBindJSON(&input)
+
+	bom, err := h.svc.ReleaseBOM(c.Request.Context(), bomID, userID, input.ReleaseNote)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	Success(c, bom)
+}
+
+// CreateFromBOM POST /projects/:id/boms/create-from
+func (h *BOMHandler) CreateFromBOM(c *gin.Context) {
+	projectID := c.Param("id")
+	userID := c.GetString("user_id")
+
+	var input struct {
+		SourceBOMID string `json:"source_bom_id" binding:"required"`
+		TargetType  string `json:"target_type" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	bom, err := h.svc.CreateFromBOM(c.Request.Context(), projectID, input.SourceBOMID, input.TargetType, userID)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	Created(c, bom)
+}
+
 // ==================== Phase 2: Excel 导入/导出 ====================
 
 // ExportBOM GET /projects/:id/boms/:bomId/export
@@ -301,7 +343,7 @@ func (h *BOMHandler) ImportBOM(c *gin.Context) {
 		}
 
 		var result *service.ImportResult
-		if bom.BOMType == "SBOM" {
+		if bom.BOMType == "PBOM" {
 			result, err = h.svc.ImportStructuralBOM(c.Request.Context(), bomID, f)
 		} else {
 			result, err = h.svc.ImportBOM(c.Request.Context(), bomID, f)
@@ -369,8 +411,8 @@ func (h *BOMHandler) DownloadTemplate(c *gin.Context) {
 	defer f.Close()
 
 	filename := "BOM_Import_Template.xlsx"
-	if bomType == "SBOM" {
-		filename = "SBOM_Import_Template.xlsx"
+	if bomType == "PBOM" {
+		filename = "PBOM_Import_Template.xlsx"
 	}
 
 	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -445,4 +487,232 @@ func (h *BOMHandler) AckBOMRelease(c *gin.Context) {
 	}
 
 	Success(c, release)
+}
+
+// ==================== Phase 5: 属性模板 ====================
+
+// ListTemplates GET /api/v1/bom-templates?category=X&sub_category=Y
+func (h *BOMHandler) ListTemplates(c *gin.Context) {
+	category := c.Query("category")
+	subCategory := c.Query("sub_category")
+
+	templates, err := h.svc.ListTemplates(c.Request.Context(), category, subCategory)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+	Success(c, templates)
+}
+
+// CreateTemplate POST /api/v1/bom-templates
+func (h *BOMHandler) CreateTemplate(c *gin.Context) {
+	var input service.TemplateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	t, err := h.svc.CreateTemplate(c.Request.Context(), &input)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	Created(c, t)
+}
+
+// UpdateTemplate PUT /api/v1/bom-templates/:id
+func (h *BOMHandler) UpdateTemplate(c *gin.Context) {
+	id := c.Param("id")
+	var input service.TemplateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	t, err := h.svc.UpdateTemplate(c.Request.Context(), id, &input)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	Success(c, t)
+}
+
+// DeleteTemplate DELETE /api/v1/bom-templates/:id
+func (h *BOMHandler) DeleteTemplate(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.svc.DeleteTemplate(c.Request.Context(), id); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	Success(c, gin.H{"deleted": true})
+}
+
+// GetCategoryTree GET /projects/:id/boms/:bomId/category-tree
+func (h *BOMHandler) GetCategoryTree(c *gin.Context) {
+	bomID := c.Param("bomId")
+	tree, err := h.svc.GetCategoryTree(c.Request.Context(), bomID)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+	Success(c, tree)
+}
+
+// SeedTemplates POST /api/v1/bom-templates/seed
+func (h *BOMHandler) SeedTemplates(c *gin.Context) {
+	h.svc.SeedDefaultTemplates(c.Request.Context())
+	Success(c, gin.H{"seeded": true})
+}
+
+// ==================== Phase 6: 工艺路线 ====================
+
+// CreateRoute POST /projects/:id/boms/:bomId/routes
+func (h *BOMHandler) CreateRoute(c *gin.Context) {
+	projectID := c.Param("id")
+	bomID := c.Param("bomId")
+	var input service.RouteInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	input.BOMID = bomID
+	userID := c.GetString("user_id")
+	route, err := h.svc.CreateRoute(c.Request.Context(), projectID, &input, userID)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	Created(c, route)
+}
+
+// GetRoute GET /projects/:id/routes/:routeId
+func (h *BOMHandler) GetRoute(c *gin.Context) {
+	routeID := c.Param("routeId")
+	route, err := h.svc.GetRoute(c.Request.Context(), routeID)
+	if err != nil {
+		NotFound(c, "Route not found")
+		return
+	}
+	Success(c, route)
+}
+
+// ListRoutes GET /projects/:id/routes
+func (h *BOMHandler) ListRoutes(c *gin.Context) {
+	projectID := c.Param("id")
+	routes, err := h.svc.ListRoutes(c.Request.Context(), projectID)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+	Success(c, routes)
+}
+
+// UpdateRoute PUT /projects/:id/routes/:routeId
+func (h *BOMHandler) UpdateRoute(c *gin.Context) {
+	routeID := c.Param("routeId")
+	var input service.RouteInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	route, err := h.svc.UpdateRoute(c.Request.Context(), routeID, &input)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	Success(c, route)
+}
+
+// CreateStep POST /projects/:id/routes/:routeId/steps
+func (h *BOMHandler) CreateStep(c *gin.Context) {
+	routeID := c.Param("routeId")
+	var input service.StepInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	step, err := h.svc.CreateStep(c.Request.Context(), routeID, &input)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	Created(c, step)
+}
+
+// UpdateStep PUT /projects/:id/routes/:routeId/steps/:stepId
+func (h *BOMHandler) UpdateStep(c *gin.Context) {
+	stepID := c.Param("stepId")
+	var input service.StepInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	step, err := h.svc.UpdateStep(c.Request.Context(), stepID, &input)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	Success(c, step)
+}
+
+// DeleteStep DELETE /projects/:id/routes/:routeId/steps/:stepId
+func (h *BOMHandler) DeleteStep(c *gin.Context) {
+	stepID := c.Param("stepId")
+	if err := h.svc.DeleteStep(c.Request.Context(), stepID); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	Success(c, gin.H{"deleted": true})
+}
+
+// CreateStepMaterial POST /projects/:id/routes/:routeId/steps/:stepId/materials
+func (h *BOMHandler) CreateStepMaterial(c *gin.Context) {
+	stepID := c.Param("stepId")
+	var input service.StepMaterialInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	m, err := h.svc.CreateStepMaterial(c.Request.Context(), stepID, &input)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	Created(c, m)
+}
+
+// DeleteStepMaterial DELETE /projects/:id/routes/:routeId/steps/:stepId/materials/:materialId
+func (h *BOMHandler) DeleteStepMaterial(c *gin.Context) {
+	materialID := c.Param("materialId")
+	if err := h.svc.DeleteStepMaterial(c.Request.Context(), materialID); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	Success(c, gin.H{"deleted": true})
+}
+
+// ConvertToPBOM POST /projects/:id/boms/:bomId/convert-to-pbom
+func (h *BOMHandler) ConvertToPBOM(c *gin.Context) {
+	bomID := c.Param("bomId")
+	userID := c.GetString("user_id")
+
+	pbom, err := h.svc.ConvertToPBOM(c.Request.Context(), bomID, userID)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	Created(c, pbom)
+}
+
+// GetBOMPermissions GET /projects/:id/bom-permissions
+func (h *BOMHandler) GetBOMPermissions(c *gin.Context) {
+	projectID := c.Param("id")
+	userID := GetUserID(c)
+
+	perms, err := h.svc.GetBOMPermissions(c.Request.Context(), projectID, userID)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, perms)
 }

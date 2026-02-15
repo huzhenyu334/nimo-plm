@@ -161,10 +161,10 @@ func (s *SKUService) GetFullBOM(ctx context.Context, skuID string, projectID str
 		selectedIDs[item.BOMItemID] = item
 	}
 
-	// Get the SBOM
-	boms, err := s.bomRepo.ListByProject(ctx, projectID, "SBOM", "")
+	// Get the PBOM
+	boms, err := s.bomRepo.ListByProject(ctx, projectID, "PBOM", "")
 	if err != nil {
-		return nil, fmt.Errorf("获取SBOM失败: %w", err)
+		return nil, fmt.Errorf("获取PBOM失败: %w", err)
 	}
 	if len(boms) == 0 {
 		return []map[string]interface{}{}, nil
@@ -198,13 +198,13 @@ func (s *SKUService) GetFullBOM(ctx context.Context, skuID string, projectID str
 			"id":                item.ID,
 			"item_number":       item.ItemNumber,
 			"name":              item.Name,
-			"specification":     item.Specification,
+			"specification":     getExtAttr(item.ExtendedAttrs, "specification"),
 			"quantity":          qty,
 			"unit":              item.Unit,
 			"category":          item.Category,
-			"material_type":     item.MaterialType,
-			"process_type":      item.ProcessType,
-			"is_appearance_part": item.IsAppearancePart,
+			"material_type":     getExtAttr(item.ExtendedAttrs, "material_type"),
+			"process_type":      getExtAttr(item.ExtendedAttrs, "process_type"),
+			"is_appearance_part": getExtAttrBool(item.ExtendedAttrs, "is_appearance_part"),
 		}
 
 		// 如果关联了CMF变体，查询完整CMF数据

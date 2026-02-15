@@ -74,7 +74,7 @@ const getCategorySortKey = (category: string): number => {
 const CATEGORY_FILTERS = [
   { value: 'all', label: '全部需求' },
   { value: 'EBOM', label: '电子EBOM' },
-  { value: 'SBOM', label: '结构SBOM' },
+  { value: 'PBOM', label: '工艺PBOM' },
   { value: 'PBOM', label: '包装PBOM' },
   { value: 'TOOLING', label: '工装治具' },
   { value: 'AUXILIARY', label: '生产辅料' },
@@ -212,7 +212,7 @@ const KanbanBoard: React.FC = () => {
       const matGroup = (item.material_group || '').toLowerCase();
 
       if (bomType === 'EBOM' && activeCats.includes('EBOM')) return true;
-      if (bomType === 'SBOM' && activeCats.includes('SBOM')) return true;
+      if (bomType === 'PBOM' && activeCats.includes('PBOM')) return true;
       if (bomType === 'PBOM' && activeCats.includes('PBOM')) return true;
       if (matGroup === 'tooling' && activeCats.includes('TOOLING')) return true;
       if (matGroup === 'auxiliary' && activeCats.includes('AUXILIARY')) return true;
@@ -1143,7 +1143,7 @@ const getBomCategoryTag = (item: KanbanItem): { label: string; color: string } |
   const matGroup = (item.material_group || '').toLowerCase();
 
   if (bomType === 'EBOM') return { label: '电子类', color: 'blue' };
-  if (bomType === 'SBOM') return { label: '结构类', color: 'green' };
+  if (bomType === 'PBOM') return { label: '工艺类', color: 'green' };
   if (bomType === 'PBOM') return { label: '包装类', color: 'orange' };
   if (matGroup === 'tooling' || bomType === 'TOOLING') return { label: '工装治具类', color: 'purple' };
   if (matGroup === 'auxiliary' || matGroup === 'consumable' || bomType === 'CONSUMABLE') return { label: '辅料类', color: 'default' };

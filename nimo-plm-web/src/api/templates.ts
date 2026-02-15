@@ -43,7 +43,7 @@ export interface TemplateTask {
   description?: string;
   phase: string;
   parent_task_code?: string;
-  task_type: 'MILESTONE' | 'TASK' | 'SUBTASK' | 'srm_procurement';
+  task_type: 'MILESTONE' | 'TASK' | 'SUBTASK';
   default_assignee_role?: string;
   estimated_days: number;
   is_critical: boolean;

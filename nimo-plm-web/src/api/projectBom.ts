@@ -6,11 +6,19 @@ export interface ProjectBOM {
   id: string;
   project_id: string;
   phase_id?: string;
+  task_id?: string;
   name: string;
-  bom_type: string;
+  bom_type: 'EBOM' | 'PBOM' | 'MBOM';
+  source_bom_id?: string;
+  source_version?: string;
   version: string;
-  status: 'draft' | 'pending_review' | 'published' | 'rejected' | 'frozen';
+  version_major: number;
+  version_minor: number;
+  status: 'draft' | 'released' | 'obsolete' | 'pending_review' | 'published' | 'rejected' | 'frozen';
   description?: string;
+  release_note?: string;
+  released_at?: string;
+  released_by?: string;
   submitted_by?: string;
   submitted_at?: string;
   reviewed_by?: string;
@@ -40,6 +48,7 @@ export interface ProjectBOMItem {
   level: number;
   material_id?: string;
   category: string;
+  sub_category?: string;
   name: string;
   specification?: string;
   quantity: number;
@@ -52,60 +61,25 @@ export interface ProjectBOMItem {
   unit_price?: number;
   extended_cost?: number;
   lead_time_days?: number;
-  procurement_type: string;
-  moq?: number;
-  approved_vendors?: string;
-  lifecycle_status: string;
+  notes?: string;
+  drawing_no?: string;
   is_critical: boolean;
   is_alternative: boolean;
   alternative_for?: string;
-  notes?: string;
-  // SBOM 结构BOM专用字段
-  material_type?: string;
-  color?: string;
-  surface_treatment?: string;
-  process_type?: string;
-  drawing_no?: string;
-  drawing_2d_file_id?: string;
-  drawing_2d_file_name?: string;
-  drawing_3d_file_id?: string;
-  drawing_3d_file_name?: string;
-  weight_grams?: number;
-  target_price?: number;
-  tooling_estimate?: number;
-  cost_notes?: string;
-  is_appearance_part?: boolean;
-  is_variant?: boolean;
-  assembly_method?: string;
-  tolerance_grade?: string;
-  // EBOM专用字段
-  item_type?: string;  // component | pcb | service | material
-  designator?: string;
-  package?: string;
-  pcb_layers?: number;
-  pcb_thickness?: string;
-  pcb_material?: string;
-  pcb_dimensions?: string;
-  pcb_surface_finish?: string;
-  service_type?: string;
-  process_requirements?: string;
-  attachments?: string;  // JSON string: [{file_id,file_name,file_type,url}]
-  // PBOM包装BOM专用字段
-  print_process?: string;
-  surface_finish_pkg?: string;
-  design_file_id?: string;
-  design_file_name?: string;
-  die_cut_file_id?: string;
-  die_cut_file_name?: string;
-  is_multilang?: boolean;
-  packing_qty?: number;
-  language_code?: string;
+  attachments?: string;
+  thumbnail_url?: string;
+  // 动态扩展属性（由属性模板决定）
+  extended_attrs?: Record<string, any>;
+  // 工艺关联
+  process_step_id?: string;
+  scrap_rate?: number;
+  effective_date?: string;
+  expire_date?: string;
   created_at: string;
   updated_at: string;
   // Relations
   material?: { id: string; name: string; code: string; specification?: string };
   children?: ProjectBOMItem[];
-  lang_variants?: LangVariant[];
 }
 
 export interface LangVariant {
@@ -140,6 +114,7 @@ export interface BOMItemRequest {
   parent_item_id?: string;
   level?: number;
   category?: string;
+  sub_category?: string;
   name: string;
   specification?: string;
   quantity: number;
@@ -151,52 +126,86 @@ export interface BOMItemRequest {
   supplier_pn?: string;
   unit_price?: number;
   lead_time_days?: number;
-  procurement_type?: string;
-  moq?: number;
-  lifecycle_status?: string;
   is_critical?: boolean;
   is_alternative?: boolean;
-  notes?: string;
-  item_number?: number;
-  // SBOM 结构BOM专用字段
-  material_type?: string;
-  color?: string;
-  surface_treatment?: string;
-  process_type?: string;
-  drawing_no?: string;
-  drawing_2d_file_id?: string;
-  drawing_2d_file_name?: string;
-  drawing_3d_file_id?: string;
-  drawing_3d_file_name?: string;
-  weight_grams?: number;
-  target_price?: number;
-  tooling_estimate?: number;
-  cost_notes?: string;
   is_appearance_part?: boolean;
-  assembly_method?: string;
-  tolerance_grade?: string;
-  // EBOM专用字段
-  item_type?: string;
-  designator?: string;
-  package?: string;
-  pcb_layers?: number;
-  pcb_thickness?: string;
-  pcb_material?: string;
-  pcb_dimensions?: string;
-  pcb_surface_finish?: string;
-  service_type?: string;
-  process_requirements?: string;
+  notes?: string;
+  drawing_no?: string;
+  item_number?: number;
   attachments?: string;
-  // PBOM专用字段
-  print_process?: string;
-  surface_finish_pkg?: string;
-  design_file_id?: string;
-  design_file_name?: string;
-  die_cut_file_id?: string;
-  die_cut_file_name?: string;
-  is_multilang?: boolean;
-  packing_qty?: number;
-  language_code?: string;
+  // 动态扩展属性
+  extended_attrs?: Record<string, any>;
+}
+
+// 属性模板
+export interface CategoryAttrTemplate {
+  id: string;
+  category: string;
+  sub_category: string;
+  bom_type: 'EBOM' | 'PBOM';
+  field_key: string;
+  field_name: string;
+  field_type: 'text' | 'number' | 'select' | 'boolean' | 'date' | 'file' | 'thumbnail';
+  unit?: string;
+  required: boolean;
+  options?: Record<string, any>;
+  validation?: Record<string, any>;
+  default_value?: string;
+  sort_order: number;
+  show_in_table: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// 工艺路线
+export interface ProcessRoute {
+  id: string;
+  project_id: string;
+  bom_id?: string;
+  name: string;
+  description?: string;
+  version: string;
+  status: string;
+  created_by?: string;
+  steps?: ProcessStep[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProcessStep {
+  id: string;
+  route_id: string;
+  step_number: number;
+  name: string;
+  description?: string;
+  equipment?: string;
+  cycle_time_seconds?: number;
+  setup_time_minutes?: number;
+  quality_checks?: string;
+  sort_order: number;
+  materials?: ProcessStepMaterial[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProcessStepMaterial {
+  id: string;
+  step_id: string;
+  material_id?: string;
+  bom_item_id?: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// 分类树节点
+export interface CategoryTreeNode {
+  category: string;
+  sub_category: string;
+  count: number;
 }
 
 export const projectBomApi = {
@@ -342,9 +351,142 @@ export const projectBomApi = {
     return response.data.data;
   },
 
+  // EBOM转PBOM
+  convertToPBOM: async (projectId: string, bomId: string): Promise<any> => {
+    const response = await apiClient.post(`/projects/${projectId}/boms/${bomId}/convert-to-pbom`, {});
+    return response.data.data;
+  },
+
+  // 发布BOM
+  release: async (projectId: string, bomId: string, releaseNote?: string): Promise<ProjectBOM> => {
+    const response = await apiClient.post<ApiResponse<ProjectBOM>>(
+      `/projects/${projectId}/boms/${bomId}/release`, { release_note: releaseNote || '' }
+    );
+    return response.data.data;
+  },
+
+  // 从上游BOM创建（EBOM→PBOM, PBOM→MBOM）
+  createFrom: async (projectId: string, sourceBomId: string, targetType: string): Promise<ProjectBOM> => {
+    const response = await apiClient.post<ApiResponse<ProjectBOM>>(
+      `/projects/${projectId}/boms/create-from`, { source_bom_id: sourceBomId, target_type: targetType }
+    );
+    return response.data.data;
+  },
+
   // BOM版本对比
   compareBOMs: async (bomId1: string, bomId2: string): Promise<any> => {
     const response = await apiClient.get(`/bom-compare?bom1=${bomId1}&bom2=${bomId2}`);
     return response.data.data;
   },
+
+  // 分类树
+  getCategoryTree: async (projectId: string, bomId: string): Promise<CategoryTreeNode[]> => {
+    const response = await apiClient.get<ApiResponse<CategoryTreeNode[]>>(
+      `/projects/${projectId}/boms/${bomId}/category-tree`
+    );
+    return response.data.data;
+  },
+
+  // ========== 属性模板 ==========
+  listTemplates: async (params?: { category?: string; sub_category?: string }): Promise<CategoryAttrTemplate[]> => {
+    const searchParams = new URLSearchParams();
+    if (params?.category) searchParams.set('category', params.category);
+    if (params?.sub_category) searchParams.set('sub_category', params.sub_category);
+    const query = searchParams.toString();
+    const response = await apiClient.get<ApiResponse<CategoryAttrTemplate[]>>(
+      `/bom-attr-templates${query ? `?${query}` : ''}`
+    );
+    return response.data.data;
+  },
+
+  createTemplate: async (data: Omit<CategoryAttrTemplate, 'id' | 'created_at' | 'updated_at'>): Promise<CategoryAttrTemplate> => {
+    const response = await apiClient.post<ApiResponse<CategoryAttrTemplate>>('/bom-attr-templates', data);
+    return response.data.data;
+  },
+
+  updateTemplate: async (id: string, data: Partial<CategoryAttrTemplate>): Promise<CategoryAttrTemplate> => {
+    const response = await apiClient.put<ApiResponse<CategoryAttrTemplate>>(`/bom-attr-templates/${id}`, data);
+    return response.data.data;
+  },
+
+  deleteTemplate: async (id: string): Promise<void> => {
+    await apiClient.delete(`/bom-attr-templates/${id}`);
+  },
+
+  seedTemplates: async (): Promise<void> => {
+    await apiClient.post('/bom-attr-templates/seed', {});
+  },
+
+  // ========== 工艺路线 ==========
+  listRoutes: async (projectId: string): Promise<ProcessRoute[]> => {
+    const response = await apiClient.get<ApiResponse<ProcessRoute[]>>(`/projects/${projectId}/routes`);
+    return response.data.data;
+  },
+
+  getRoute: async (projectId: string, routeId: string): Promise<ProcessRoute> => {
+    const response = await apiClient.get<ApiResponse<ProcessRoute>>(`/projects/${projectId}/routes/${routeId}`);
+    return response.data.data;
+  },
+
+  createRoute: async (projectId: string, bomId: string, data: { name: string; description?: string }): Promise<ProcessRoute> => {
+    const response = await apiClient.post<ApiResponse<ProcessRoute>>(
+      `/projects/${projectId}/boms/${bomId}/routes`, data
+    );
+    return response.data.data;
+  },
+
+  updateRoute: async (projectId: string, routeId: string, data: { name?: string; description?: string; status?: string }): Promise<ProcessRoute> => {
+    const response = await apiClient.put<ApiResponse<ProcessRoute>>(
+      `/projects/${projectId}/routes/${routeId}`, data
+    );
+    return response.data.data;
+  },
+
+  // ========== 工序 ==========
+  createStep: async (projectId: string, routeId: string, data: {
+    name: string; step_number: number; description?: string; equipment?: string;
+    cycle_time_seconds?: number; setup_time_minutes?: number; quality_checks?: string; sort_order?: number;
+  }): Promise<ProcessStep> => {
+    const response = await apiClient.post<ApiResponse<ProcessStep>>(
+      `/projects/${projectId}/routes/${routeId}/steps`, data
+    );
+    return response.data.data;
+  },
+
+  updateStep: async (projectId: string, routeId: string, stepId: string, data: Partial<ProcessStep>): Promise<ProcessStep> => {
+    const response = await apiClient.put<ApiResponse<ProcessStep>>(
+      `/projects/${projectId}/routes/${routeId}/steps/${stepId}`, data
+    );
+    return response.data.data;
+  },
+
+  deleteStep: async (projectId: string, routeId: string, stepId: string): Promise<void> => {
+    await apiClient.delete(`/projects/${projectId}/routes/${routeId}/steps/${stepId}`);
+  },
+
+  // ========== 工序物料 ==========
+  createStepMaterial: async (projectId: string, routeId: string, stepId: string, data: {
+    name: string; material_id?: string; bom_item_id?: string; quantity?: number; unit?: string; notes?: string;
+  }): Promise<ProcessStepMaterial> => {
+    const response = await apiClient.post<ApiResponse<ProcessStepMaterial>>(
+      `/projects/${projectId}/routes/${routeId}/steps/${stepId}/materials`, data
+    );
+    return response.data.data;
+  },
+
+  deleteStepMaterial: async (projectId: string, routeId: string, stepId: string, materialId: string): Promise<void> => {
+    await apiClient.delete(`/projects/${projectId}/routes/${routeId}/steps/${stepId}/materials/${materialId}`);
+  },
+
+  // BOM权限
+  getBOMPermissions: async (projectId: string): Promise<BOMPermissions> => {
+    const res = await apiClient.get<ApiResponse<BOMPermissions>>(`/projects/${projectId}/bom-permissions`);
+    return res.data.data;
+  },
 };
+
+export interface BOMPermissions {
+  can_edit_categories: string[];
+  can_view_all: boolean;
+  can_release: boolean;
+}

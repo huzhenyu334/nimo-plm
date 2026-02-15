@@ -125,7 +125,7 @@ func (s *LangVariantService) GetMultilangParts(ctx context.Context, projectID st
 			continue
 		}
 		for _, item := range bomDetail.Items {
-			if !item.IsMultilang {
+			if getExtAttr(item.ExtendedAttrs, "is_multilang") != "true" {
 				continue
 			}
 			variants, _ := s.variantRepo.ListByBOMItem(ctx, item.ID)

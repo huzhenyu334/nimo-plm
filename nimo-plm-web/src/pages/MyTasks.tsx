@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSSE } from '@/hooks/useSSE';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import {
   Tag,
   Button,
@@ -31,6 +32,7 @@ import {
   ArrowLeftOutlined,
   FolderOutlined,
   FileExcelOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload';
 import type { ColumnsType } from 'antd/es/table';
@@ -46,6 +48,7 @@ import PBOMEditableTable from '@/components/PBOMEditableTable';
 import CMFEditControl from '@/components/CMFEditControl';
 import { ToolingListControl, ConsumableListControl } from '@/components/ItemListControl';
 import ProcurementControl from '@/components/ProcurementControl';
+import { EBOMControl, PBOMControl, MBOMControl, type BOMControlConfig } from '@/components/BOM';
 
 const { Text, Title } = Typography;
 
@@ -160,7 +163,7 @@ const RoleAssignmentField: React.FC<{
 const BOMUploadField: React.FC<{
   value?: { filename: string; items: BOMItemRecord[]; item_count: number };
   onChange?: (value: { filename: string; items: BOMItemRecord[]; item_count: number } | undefined) => void;
-  bomType?: 'EBOM' | 'SBOM' | 'PBOM';
+  bomType?: 'EBOM' | 'PBOM' | 'MBOM';
   onSaveDraft?: () => void;
 }> = ({ value, onChange, bomType = 'EBOM', onSaveDraft }) => {
   const [parsing, setParsing] = useState(false);
@@ -238,9 +241,9 @@ const BOMUploadField: React.FC<{
 
 // ========== BOM Data Display (read-only, reuses BOMEditableTable) ==========
 
-const BOMDataDisplay: React.FC<{ data: { filename: string; items: BOMItemRecord[]; item_count: number }; bomType?: 'EBOM' | 'SBOM' | 'PBOM' }> = ({ data, bomType = 'EBOM' }) => {
+const BOMDataDisplay: React.FC<{ data: { filename: string; items: BOMItemRecord[]; item_count: number }; bomType?: 'EBOM' | 'PBOM' | 'MBOM' }> = ({ data, bomType = 'EBOM' }) => {
   const [expanded, setExpanded] = useState(false);
-  const bomLabel = bomType === 'SBOM' ? '结构BOM' : bomType === 'PBOM' ? '包装BOM' : '电子BOM';
+  const bomLabel = bomType === 'PBOM' ? '生产BOM' : bomType === 'MBOM' ? '制造BOM' : '工程BOM';
 
   return (
     <div>
@@ -289,6 +292,7 @@ const FormDataDisplay: React.FC<{ projectId: string; taskId: string }> = ({ proj
   const [submission, setSubmission] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [userMap, setUserMap] = useState<Record<string, string>>({});
+  const isMobileForm = useIsMobile();
 
   React.useEffect(() => {
     setLoading(true);
@@ -314,66 +318,67 @@ const FormDataDisplay: React.FC<{ projectId: string; taskId: string }> = ({ proj
   const fields = formDef.fields || [];
   const data = submission.data || {};
 
+  const renderField = (field: any) => {
+    let value = data[field.key];
+    if (field.type === 'bom_upload' && value && typeof value === 'object' && value.items)
+      return { key: field.key, label: field.label, complex: true, node: <BOMDataDisplay data={value} bomType={field.bom_type || 'EBOM'} /> };
+    if (['ebom_control', 'pbom_control', 'mbom_control'].includes(field.type) && Array.isArray(value)) {
+      const BOMControl = field.type === 'ebom_control' ? EBOMControl : field.type === 'pbom_control' ? PBOMControl : MBOMControl;
+      return { key: field.key, label: field.label, complex: true, node: <BOMControl config={(field.config || {}) as BOMControlConfig} value={value} onChange={() => {}} readonly /> };
+    }
+    if (field.type === 'cmf')
+      return { key: field.key, label: field.label, complex: true, node: <CMFEditControl projectId={projectId} taskId={taskId} readonly /> };
+    if ((field.type === 'tooling_list' || field.type === 'consumable_list') && value && typeof value === 'object' && value.items) {
+      const ListControl = field.type === 'tooling_list' ? ToolingListControl : ConsumableListControl;
+      return { key: field.key, label: field.label, complex: true, node: <ListControl value={value} readonly /> };
+    }
+    if (field.type === 'procurement_control' && value && typeof value === 'object')
+      return { key: field.key, label: field.label, complex: true, node: <ProcurementControl value={value} /> };
+    if (value === undefined || value === null) value = '-';
+    else if (field.type === 'role_assignment' && typeof value === 'object' && !Array.isArray(value))
+      value = Object.entries(value as Record<string, string>).map(([code, uid]) => `${code}: ${userMap[uid] || uid}`).join('; ') || '-';
+    else if (field.type === 'user') value = userMap[value] || value;
+    else if (typeof value === 'boolean') value = value ? '是' : '否';
+    else if (Array.isArray(value))
+      value = value.length > 0 && typeof value[0] === 'object' && value[0].filename ? value.map((f: any) => f.filename).join(', ') : value.join(', ');
+    return { key: field.key, label: field.label, complex: false, text: String(value) };
+  };
+
+  const rendered = fields.map(renderField);
+
+  if (isMobileForm) {
+    return (
+      <div>
+        <div className="ds-section-title">已提交的表单</div>
+        {rendered.map((f: any) => f.complex ? (
+          <div key={f.key} style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--ds-text-secondary)', marginBottom: 4 }}>{f.label}</div>
+            {f.node}
+          </div>
+        ) : (
+          <div key={f.key} className="ds-info-row">
+            <span className="ds-info-label">{f.label}</span>
+            <span className="ds-info-value">{f.text}</span>
+          </div>
+        ))}
+        {submission.submitted_at && (
+          <div style={{ fontSize: 11, color: 'var(--ds-text-secondary)', marginTop: 8 }}>
+            提交时间: {dayjs(submission.submitted_at).format('YYYY-MM-DD HH:mm')}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
       <Text strong style={{ fontSize: 14, marginBottom: 12, display: 'block' }}>已提交的表单</Text>
       <Descriptions size="small" column={1} bordered>
-        {fields.map((field: any) => {
-          let value = data[field.key];
-          // bom_upload: render as expandable BOM data
-          if (field.type === 'bom_upload' && value && typeof value === 'object' && value.items) {
-            return (
-              <Descriptions.Item key={field.key} label={field.label}>
-                <BOMDataDisplay data={value} bomType={field.bom_type || 'EBOM'} />
-              </Descriptions.Item>
-            );
-          }
-          // cmf: render CMF control in readonly mode
-          if (field.type === 'cmf') {
-            return (
-              <Descriptions.Item key={field.key} label={field.label}>
-                <CMFEditControl projectId={projectId} taskId={taskId} readonly />
-              </Descriptions.Item>
-            );
-          }
-          // tooling_list / consumable_list: readonly table
-          if ((field.type === 'tooling_list' || field.type === 'consumable_list') && value && typeof value === 'object' && value.items) {
-            const ListControl = field.type === 'tooling_list' ? ToolingListControl : ConsumableListControl;
-            return (
-              <Descriptions.Item key={field.key} label={field.label}>
-                <ListControl value={value} readonly />
-              </Descriptions.Item>
-            );
-          }
-          // procurement_control: readonly PR info
-          if (field.type === 'procurement_control' && value && typeof value === 'object') {
-            return (
-              <Descriptions.Item key={field.key} label={field.label}>
-                <ProcurementControl value={value} />
-              </Descriptions.Item>
-            );
-          }
-          if (value === undefined || value === null) value = '-';
-          else if (field.type === 'role_assignment' && typeof value === 'object' && !Array.isArray(value)) {
-            value = Object.entries(value as Record<string, string>)
-              .map(([code, uid]) => `${code}: ${userMap[uid] || uid}`)
-              .join('; ') || '-';
-          }
-          else if (field.type === 'user') value = userMap[value] || value;
-          else if (typeof value === 'boolean') value = value ? '是' : '否';
-          else if (Array.isArray(value)) {
-            if (value.length > 0 && typeof value[0] === 'object' && value[0].filename) {
-              value = value.map((f: any) => f.filename).join(', ');
-            } else {
-              value = value.join(', ');
-            }
-          }
-          return (
-            <Descriptions.Item key={field.key} label={field.label}>
-              {String(value)}
-            </Descriptions.Item>
-          );
-        })}
+        {rendered.map((f: any) => f.complex ? (
+          <Descriptions.Item key={f.key} label={f.label}>{f.node}</Descriptions.Item>
+        ) : (
+          <Descriptions.Item key={f.key} label={f.label}>{f.text}</Descriptions.Item>
+        ))}
       </Descriptions>
       {submission.submitted_at && (
         <Text type="secondary" style={{ fontSize: 11, marginTop: 8, display: 'block' }}>
@@ -397,6 +402,7 @@ const TaskDetailView: React.FC<{
   const [submitting, setSubmitting] = useState(false);
   const [starting, setStarting] = useState(false);
   const [form] = Form.useForm();
+  const isMobileDetail = useIsMobile();
 
   const { data: allUsers = [] } = useQuery<User[]>({
     queryKey: ['users'],
@@ -577,6 +583,9 @@ const TaskDetailView: React.FC<{
       );
       case 'role_assignment': return <RoleAssignmentField allUsers={allUsers} projectId={task.project_id} />;
       case 'bom_upload': return <BOMUploadField bomType={field.bom_type || 'EBOM'} onSaveDraft={saveDraftDebounced} />;
+      case 'ebom_control': return <EBOMControl config={(field.config || {}) as BOMControlConfig} value={[]} onChange={(items) => { form.setFieldValue(field.key, items); saveDraftDebounced?.(); }} />;
+      case 'pbom_control': return <PBOMControl config={(field.config || {}) as BOMControlConfig} value={[]} onChange={(items) => { form.setFieldValue(field.key, items); saveDraftDebounced?.(); }} />;
+      case 'mbom_control': return <MBOMControl config={(field.config || {}) as BOMControlConfig} value={[]} onChange={(items) => { form.setFieldValue(field.key, items); saveDraftDebounced?.(); }} />;
       case 'cmf': return <CMFEditControl projectId={task.project_id} taskId={task.id} />;
       case 'tooling_list': return <ToolingListControl onSaveDraft={saveDraftDebounced} />;
       case 'consumable_list': return <ConsumableListControl onSaveDraft={saveDraftDebounced} />;
@@ -592,13 +601,130 @@ const TaskDetailView: React.FC<{
   const projectName = (task as any).project?.name || (task as any).project_name || '-';
   const remainDays = task.due_date ? dayjs(task.due_date).diff(dayjs(), 'day') : null;
 
+  // ===== Mobile detail layout =====
+  if (isMobileDetail) {
+    const tagClass = cfg.tagColor === 'blue' ? 'ds-tag-processing' :
+      cfg.tagColor === 'green' ? 'ds-tag-success' :
+      cfg.tagColor === 'orange' || cfg.tagColor === 'gold' ? 'ds-tag-warning' :
+      cfg.tagColor === 'red' ? 'ds-tag-danger' : 'ds-tag-default';
+    return (
+      <div className="ds-detail-page">
+        <Button type="link" icon={<ArrowLeftOutlined />} onClick={onBack} style={{ padding: 0, marginBottom: 8 }}>
+          返回
+        </Button>
+
+        {/* Header */}
+        <div className="ds-detail-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <div className="ds-card-title" style={{ flex: 1 }}>{task.title}</div>
+            <span className={`ds-tag ${tagClass}`}>{cfg.text}</span>
+          </div>
+          {(task.code || task.task_code) && (
+            <div className="ds-card-subtitle" style={{ fontFamily: 'monospace', marginBottom: 8 }}>{task.code || task.task_code}</div>
+          )}
+          <div className="ds-card-meta" style={{ marginTop: 0 }}>
+            <span><FolderOutlined /> {projectName}</span>
+          </div>
+        </div>
+
+        {/* Info section */}
+        <div className="ds-detail-section">
+          <div className="ds-info-row">
+            <span className="ds-info-label">负责人</span>
+            <span className="ds-info-value"><UserTag name={task.assignee?.name || (task as any).assignee_name} avatarUrl={task.assignee?.avatar_url} /></span>
+          </div>
+          <div className="ds-info-row">
+            <span className="ds-info-label">创建人</span>
+            <span className="ds-info-value"><UserTag name={task.creator?.name} avatarUrl={task.creator?.avatar_url} /></span>
+          </div>
+          <div className="ds-info-row">
+            <span className="ds-info-label">剩余天数</span>
+            <span className="ds-info-value" style={{ color: remainDays == null ? '#999' : remainDays < 0 ? '#ff4d4f' : remainDays <= 3 ? '#fa8c16' : '#52c41a' }}>
+              {remainDays != null ? `${remainDays}天` : '-'}
+            </span>
+          </div>
+          <div className="ds-info-row">
+            <span className="ds-info-label">日期</span>
+            <span className="ds-info-value">
+              {task.start_date ? dayjs(task.start_date).format('MM-DD') : '-'} ~ {task.due_date ? dayjs(task.due_date).format('MM-DD') : '-'}
+            </span>
+          </div>
+          <div className="ds-info-row">
+            <span className="ds-info-label">进度</span>
+            <span className="ds-info-value"><Progress percent={task.progress} size="small" style={{ width: 80 }} /></span>
+          </div>
+          {task.description && (
+            <div style={{ paddingTop: 8, fontSize: 13, color: 'var(--ds-text-secondary)' }}>{task.description}</div>
+          )}
+        </div>
+
+        {/* Form section */}
+        <div className="ds-detail-section">
+          {formLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+          ) : hasForm && isInProgress ? (
+            <div>
+              <div className="ds-section-title">任务表单</div>
+              {taskForm!.description && (
+                <div style={{ marginBottom: 12, color: '#666', fontSize: 13 }}>{taskForm!.description}</div>
+              )}
+              <Form form={form} layout="vertical" preserve={false} onFieldsChange={saveDraftDebounced}>
+                {taskForm!.fields.map((field) => (
+                  <Form.Item
+                    key={field.key}
+                    name={field.key}
+                    label={field.label}
+                    rules={field.type !== 'checkbox' && field.required ? [{ required: true, message: `请填写${field.label}` }] : undefined}
+                    valuePropName={field.type === 'checkbox' ? 'checked' : 'value'}
+                    extra={field.type !== 'checkbox' ? field.description : undefined}
+                  >
+                    {renderFormField(field)}
+                  </Form.Item>
+                ))}
+              </Form>
+            </div>
+          ) : showFormData ? (
+            <FormDataDisplay projectId={task.project_id} taskId={task.id} />
+          ) : (
+            <Empty description="该任务暂无表单" />
+          )}
+        </div>
+
+        {/* Action bar */}
+        {(task.status === 'pending' || task.status === 'in_progress' || task.status === 'rejected') && (
+          <div className="bom-mobile-action-bar">
+            {task.status === 'pending' && (
+              <Button type="primary" loading={starting} onClick={handleStart} block
+                style={{ background: '#52c41a', borderColor: '#52c41a' }}>
+                开始任务
+              </Button>
+            )}
+            {task.status === 'in_progress' && (
+              <Button type="primary" loading={submitting} onClick={handleSubmit} block
+                icon={<CheckCircleOutlined />}
+                style={{ background: '#52c41a', borderColor: '#52c41a' }}>
+                {hasForm ? '提交表单' : '提交任务'}
+              </Button>
+            )}
+            {task.status === 'rejected' && (
+              <Button type="primary" loading={starting} onClick={handleStart} block
+                style={{ background: '#fa8c16', borderColor: '#fa8c16' }}>
+                重新开始
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ===== Desktop detail layout =====
   return (
     <div style={{ padding: 24 }}>
       <Button type="link" icon={<ArrowLeftOutlined />} onClick={onBack} style={{ padding: 0, marginBottom: 16 }}>
         返回任务列表
       </Button>
 
-      {/* Task header */}
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
           <div>
@@ -606,13 +732,12 @@ const TaskDetailView: React.FC<{
               {task.title}
               <Tag color={cfg.tagColor} style={{ marginLeft: 8, verticalAlign: 'middle' }}>{cfg.text}</Tag>
             </Title>
-            <Space size={8} style={{ marginTop: 4 }}>
+            <Space size={8} style={{ marginTop: 4 }} wrap>
               {(task.code || task.task_code) && <Text code style={{ fontSize: 12 }}>{task.code || task.task_code}</Text>}
               <Text type="secondary" style={{ fontSize: 12 }}><FolderOutlined style={{ marginRight: 4 }} />{projectName}</Text>
             </Space>
           </div>
-          {/* Action buttons */}
-          <Space>
+          <div style={{ display: 'flex', gap: 8 }}>
             {task.status === 'pending' && (
               <Button type="primary" loading={starting} onClick={handleStart}
                 style={{ background: '#52c41a', borderColor: '#52c41a' }}>
@@ -632,7 +757,7 @@ const TaskDetailView: React.FC<{
                 重新开始
               </Button>
             )}
-          </Space>
+          </div>
         </div>
 
         <Descriptions column={3} size="small" bordered>
@@ -665,7 +790,6 @@ const TaskDetailView: React.FC<{
         )}
       </Card>
 
-      {/* Form area - full width */}
       <Card>
         {formLoading ? (
           <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
@@ -704,6 +828,7 @@ const TaskDetailView: React.FC<{
 
 const MyTasks: React.FC = () => {
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
   const [activeFilter, setActiveFilter] = useState('all');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -736,12 +861,13 @@ const MyTasks: React.FC = () => {
     }, [queryClient]),
   });
 
-  // Table columns for task list
+  // Table columns for task list (desktop)
   const taskColumns: ColumnsType<Task> = [
     {
       title: '任务标题', dataIndex: 'title', ellipsis: true,
       render: (title: string, task: Task) => {
         const cfg = statusConfig[task.status] || statusConfig.pending;
+        const projName = (task as any).project?.name || (task as any).project_name || '';
         return (
           <Space size={6}>
             <Tag color={cfg.tagColor} style={{ fontSize: 10, padding: '0 4px', margin: 0, lineHeight: '18px' }}>{cfg.text}</Tag>
@@ -754,6 +880,7 @@ const MyTasks: React.FC = () => {
                 {title}
               </span>
             </Tooltip>
+            {projName && <span style={{ fontSize: 12, color: '#999' }}>· {projName}</span>}
           </Space>
         );
       },
@@ -805,6 +932,82 @@ const MyTasks: React.FC = () => {
     );
   }
 
+  // ===== Mobile Layout =====
+  if (isMobile) {
+    return (
+      <div>
+        {/* Filter pills */}
+        <div className="mobile-filter-pills">
+          {filterItems.map((item) => (
+            <div
+              key={item.key}
+              className={`mobile-filter-pill ${activeFilter === item.key ? 'active' : ''}`}
+              onClick={() => { setActiveFilter(item.key); setPage(1); }}
+            >
+              {item.label}
+            </div>
+          ))}
+        </div>
+
+        {/* Task card list */}
+        <div className="ds-page-content">
+          {isLoading ? (
+            <div style={{ textAlign: 'center', padding: 60 }}><Spin /></div>
+          ) : tasks.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 60 }}><Empty description="暂无任务" /></div>
+          ) : (
+            tasks.map((task) => {
+              const cfg = statusConfig[task.status] || statusConfig.pending;
+              const projName = (task as any).project?.name || (task as any).project_name || '';
+              const dueDate = task.due_date;
+              const days = dueDate ? dayjs(dueDate).diff(dayjs(), 'day') : null;
+              const tagClass = cfg.tagColor === 'blue' ? 'ds-tag-processing' :
+                cfg.tagColor === 'green' ? 'ds-tag-success' :
+                cfg.tagColor === 'orange' || cfg.tagColor === 'gold' ? 'ds-tag-warning' :
+                cfg.tagColor === 'red' ? 'ds-tag-danger' : 'ds-tag-default';
+              return (
+                <div
+                  key={task.id}
+                  className="ds-list-card"
+                  onClick={() => setSelectedTaskId(task.id)}
+                >
+                  <div className="ds-card-header">
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="ds-card-title" style={{
+                        color: task.status === 'completed' ? '#999' : undefined,
+                        textDecoration: task.status === 'completed' ? 'line-through' : 'none',
+                      }}>
+                        {task.title}
+                      </div>
+                    </div>
+                    <span className={`ds-tag ${tagClass}`}>{cfg.text}</span>
+                  </div>
+                  <div className="ds-card-meta">
+                    {projName && <span><FolderOutlined /> {projName}</span>}
+                    {dueDate && (
+                      <span style={{ color: days != null && days < 0 ? '#ff4d4f' : days != null && days <= 3 ? '#fa8c16' : undefined }}>
+                        <CalendarOutlined /> {dayjs(dueDate).format('MM-DD')}
+                      </span>
+                    )}
+                    {task.assignee?.name && (
+                      <span><UserOutlined /> {task.assignee.name}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+          {total > pageSize && (
+            <div style={{ textAlign: 'center', padding: '16px 0' }}>
+              <Button onClick={() => setPage(page + 1)}>加载更多</Button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ===== Desktop Layout =====
   return (
     <div style={{ padding: 24 }}>
       {/* Header with filter tabs */}

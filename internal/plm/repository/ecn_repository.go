@@ -31,6 +31,8 @@ func (r *ECNRepository) FindByID(ctx context.Context, id string) (*entity.ECN, e
 		Preload("AffectedItems").
 		Preload("Approvals").
 		Preload("Approvals.Approver").
+		Preload("Tasks").
+		Preload("Tasks.Assignee").
 		Where("id = ?", id).
 		First(&ecn).Error
 	if err != nil {
@@ -115,6 +117,7 @@ func (r *ECNRepository) List(ctx context.Context, page, pageSize int, filters ma
 	err := query.
 		Preload("Product").
 		Preload("Requester").
+		Preload("AffectedItems").
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(pageSize).
@@ -152,12 +155,92 @@ func (r *ECNRepository) GenerateCode(ctx context.Context) (string, error) {
 }
 
 // ============================================================
+// ECN统计
+// ============================================================
+
+// ECNStats ECN统计数据
+type ECNStats struct {
+	PendingApproval int64 `json:"pending_approval"`
+	Executing       int64 `json:"executing"`
+	MonthCreated    int64 `json:"month_created"`
+	MonthClosed     int64 `json:"month_closed"`
+}
+
+// GetStats 获取ECN统计数据
+func (r *ECNRepository) GetStats(ctx context.Context, userID string) (*ECNStats, error) {
+	stats := &ECNStats{}
+	now := time.Now()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+
+	// 待我审批数
+	r.db.WithContext(ctx).
+		Model(&entity.ECNApproval{}).
+		Joins("JOIN ecns ON ecns.id = ecn_approvals.ecn_id").
+		Where("ecn_approvals.approver_id = ? AND ecn_approvals.status = ? AND ecns.status = ?",
+			userID, "pending", entity.ECNStatusPending).
+		Count(&stats.PendingApproval)
+
+	// 执行中数
+	r.db.WithContext(ctx).
+		Model(&entity.ECN{}).
+		Where("status IN ?", []string{entity.ECNStatusExecuting, entity.ECNStatusApproved}).
+		Count(&stats.Executing)
+
+	// 本月新建数
+	r.db.WithContext(ctx).
+		Model(&entity.ECN{}).
+		Where("created_at >= ?", monthStart).
+		Count(&stats.MonthCreated)
+
+	// 本月关闭数
+	r.db.WithContext(ctx).
+		Model(&entity.ECN{}).
+		Where("status = ? AND updated_at >= ?", entity.ECNStatusClosed, monthStart).
+		Count(&stats.MonthClosed)
+
+	return stats, nil
+}
+
+// ListMyPending 获取待我审批的ECN
+func (r *ECNRepository) ListMyPending(ctx context.Context, userID string) ([]entity.ECN, error) {
+	var ecnIDs []string
+	err := r.db.WithContext(ctx).
+		Model(&entity.ECNApproval{}).
+		Select("ecn_id").
+		Joins("JOIN ecns ON ecns.id = ecn_approvals.ecn_id").
+		Where("ecn_approvals.approver_id = ? AND ecn_approvals.status = ? AND ecns.status = ?",
+			userID, "pending", entity.ECNStatusPending).
+		Find(&ecnIDs).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(ecnIDs) == 0 {
+		return []entity.ECN{}, nil
+	}
+
+	var ecns []entity.ECN
+	err = r.db.WithContext(ctx).
+		Preload("Product").
+		Preload("Requester").
+		Preload("AffectedItems").
+		Where("id IN ?", ecnIDs).
+		Order("created_at DESC").
+		Find(&ecns).Error
+	return ecns, err
+}
+
+// ============================================================
 // ECN受影响项目相关操作
 // ============================================================
 
 // AddAffectedItem 添加受影响项目
 func (r *ECNRepository) AddAffectedItem(ctx context.Context, item *entity.ECNAffectedItem) error {
 	return r.db.WithContext(ctx).Create(item).Error
+}
+
+// UpdateAffectedItem 更新受影响项目
+func (r *ECNRepository) UpdateAffectedItem(ctx context.Context, item *entity.ECNAffectedItem) error {
+	return r.db.WithContext(ctx).Save(item).Error
 }
 
 // RemoveAffectedItem 移除受影响项目
@@ -175,6 +258,21 @@ func (r *ECNRepository) ListAffectedItems(ctx context.Context, ecnID string) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+// FindAffectedItemByID 根据ID查找受影响项
+func (r *ECNRepository) FindAffectedItemByID(ctx context.Context, id string) (*entity.ECNAffectedItem, error) {
+	var item entity.ECNAffectedItem
+	err := r.db.WithContext(ctx).
+		Where("id = ?", id).
+		First(&item).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &item, nil
 }
 
 // ============================================================
@@ -293,12 +391,12 @@ func (r *ECNRepository) Approve(ctx context.Context, ecnID string, approverID st
 			return err
 		}
 
-		// 如果所有审批都通过，更新ECN状态
+		// 如果所有审批都通过，更新ECN状态为执行中
 		if pendingCount == 0 {
 			if err := tx.Model(&entity.ECN{}).
 				Where("id = ?", ecnID).
 				Updates(map[string]interface{}{
-					"status":      entity.ECNStatusApproved,
+					"status":      entity.ECNStatusExecuting,
 					"approved_by": approverID,
 					"approved_at": now,
 					"updated_at":  now,
@@ -343,16 +441,129 @@ func (r *ECNRepository) Reject(ctx context.Context, ecnID string, approverID str
 	})
 }
 
-// Implement 实施ECN
+// Implement 实施ECN（启动执行）
 func (r *ECNRepository) Implement(ctx context.Context, ecnID string, implementedBy string) error {
 	now := time.Now()
 	return r.db.WithContext(ctx).
 		Model(&entity.ECN{}).
-		Where("id = ? AND status = ?", ecnID, entity.ECNStatusApproved).
+		Where("id = ? AND status IN ?", ecnID, []string{entity.ECNStatusApproved, entity.ECNStatusExecuting}).
 		Updates(map[string]interface{}{
-			"status":         entity.ECNStatusImplemented,
+			"status":         entity.ECNStatusExecuting,
 			"implemented_by": implementedBy,
 			"implemented_at": now,
 			"updated_at":     now,
+		}).Error
+}
+
+// ============================================================
+// ECN执行任务相关操作
+// ============================================================
+
+// CreateTask 创建执行任务
+func (r *ECNRepository) CreateTask(ctx context.Context, task *entity.ECNTask) error {
+	return r.db.WithContext(ctx).Create(task).Error
+}
+
+// UpdateTask 更新执行任务
+func (r *ECNRepository) UpdateTask(ctx context.Context, task *entity.ECNTask) error {
+	return r.db.WithContext(ctx).Save(task).Error
+}
+
+// FindTaskByID 根据ID查找执行任务
+func (r *ECNRepository) FindTaskByID(ctx context.Context, id string) (*entity.ECNTask, error) {
+	var task entity.ECNTask
+	err := r.db.WithContext(ctx).
+		Preload("Assignee").
+		Where("id = ?", id).
+		First(&task).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &task, nil
+}
+
+// ListTasks 获取ECN执行任务列表
+func (r *ECNRepository) ListTasks(ctx context.Context, ecnID string) ([]entity.ECNTask, error) {
+	var tasks []entity.ECNTask
+	err := r.db.WithContext(ctx).
+		Where("ecn_id = ?", ecnID).
+		Preload("Assignee").
+		Order("sort_order ASC, created_at ASC").
+		Find(&tasks).Error
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+// GetTaskCompletion 获取ECN任务完成率
+func (r *ECNRepository) GetTaskCompletion(ctx context.Context, ecnID string) (int, error) {
+	var total, completed int64
+	r.db.WithContext(ctx).
+		Model(&entity.ECNTask{}).
+		Where("ecn_id = ? AND status != ?", ecnID, entity.ECNTaskStatusSkipped).
+		Count(&total)
+	r.db.WithContext(ctx).
+		Model(&entity.ECNTask{}).
+		Where("ecn_id = ? AND status = ?", ecnID, entity.ECNTaskStatusCompleted).
+		Count(&completed)
+
+	if total == 0 {
+		return 0, nil
+	}
+	return int(completed * 100 / total), nil
+}
+
+// ============================================================
+// ECN历史记录相关操作
+// ============================================================
+
+// AddHistory 添加操作历史
+func (r *ECNRepository) AddHistory(ctx context.Context, history *entity.ECNHistory) error {
+	return r.db.WithContext(ctx).Create(history).Error
+}
+
+// ListHistory 获取ECN操作历史
+func (r *ECNRepository) ListHistory(ctx context.Context, ecnID string) ([]entity.ECNHistory, error) {
+	var histories []entity.ECNHistory
+	err := r.db.WithContext(ctx).
+		Where("ecn_id = ?", ecnID).
+		Preload("User").
+		Order("created_at DESC").
+		Find(&histories).Error
+	if err != nil {
+		return nil, err
+	}
+	return histories, nil
+}
+
+// ============================================================
+// ECN关闭
+// ============================================================
+
+// CloseECN 关闭ECN
+func (r *ECNRepository) CloseECN(ctx context.Context, ecnID string) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).
+		Model(&entity.ECN{}).
+		Where("id = ?", ecnID).
+		Updates(map[string]interface{}{
+			"status":          entity.ECNStatusClosed,
+			"completion_rate": 100,
+			"updated_at":      now,
+		}).Error
+}
+
+// UpdateCompletionRate 更新ECN完成率
+func (r *ECNRepository) UpdateCompletionRate(ctx context.Context, ecnID string, rate int) error {
+	return r.db.WithContext(ctx).
+		Model(&entity.ECN{}).
+		Where("id = ?", ecnID).
+		Updates(map[string]interface{}{
+			"completion_rate": rate,
+			"updated_at":     time.Now(),
 		}).Error
 }

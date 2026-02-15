@@ -468,7 +468,7 @@ func (s *TemplateService) CreateProjectFromTemplate(ctx context.Context, input *
 
 	// 按层级排序创建：先 MILESTONE，再 TASK，最后 SUBTASK
 	// 这样 parent_task_id 引用时父任务一定已经创建
-	typeOrder := []string{"MILESTONE", "TASK", "SUBTASK", "srm_procurement"}
+	typeOrder := []string{"MILESTONE", "TASK", "SUBTASK"}
 	taskMap := make(map[string]string) // task_code -> task_id
 	var initialActiveTasks []*entity.Task // 收集初始激活的任务
 

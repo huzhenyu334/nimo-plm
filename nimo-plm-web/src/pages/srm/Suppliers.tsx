@@ -16,9 +16,10 @@ import {
   Tabs,
   Popconfirm,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, DeleteOutlined, SearchOutlined, RightOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { srmApi, Supplier, SupplierContact } from '@/api/srm';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import dayjs from 'dayjs';
 
 const { Search } = Input;
@@ -83,6 +84,7 @@ const statusMap: Record<string, { text: string; status: 'warning' | 'success' | 
 };
 
 const Suppliers: React.FC = () => {
+  const isMobile = useIsMobile();
   const queryClient = useQueryClient();
   const [searchText, setSearchText] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>();
@@ -245,7 +247,93 @@ const Suppliers: React.FC = () => {
   ];
 
   const detail = supplierDetail || currentSupplier;
+  const suppliers = data?.items || [];
 
+  // ========== Mobile Layout ==========
+  if (isMobile) {
+    return (
+      <div style={{ background: '#f5f5f5', minHeight: '100vh' }}>
+        <div style={{ padding: '12px 16px', background: '#fff', position: 'sticky', top: 0, zIndex: 10 }}>
+          <Input
+            placeholder="搜索供应商名称/编码"
+            prefix={<SearchOutlined style={{ color: '#bbb' }} />}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            onPressEnter={() => setPage(1)}
+            allowClear
+            style={{ borderRadius: 20 }}
+          />
+        </div>
+        <div className="mobile-filter-pills" style={{ padding: '8px 12px' }}>
+          {[{ label: '全部', value: undefined }, ...categoryOptions].map(opt => (
+            <div
+              key={opt.value || 'all'}
+              className={`mobile-filter-pill ${filterCategory === opt.value ? 'active' : ''}`}
+              onClick={() => { setFilterCategory(opt.value); setPage(1); }}
+            >{opt.label}</div>
+          ))}
+        </div>
+        <div style={{ padding: '0 12px' }}>
+          {isLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Badge status="processing" text="加载中..." /></div>
+          ) : suppliers.map(s => {
+            const st = statusMap[s.status] || { text: s.status, status: 'default' as const };
+            return (
+              <div key={s.id} onClick={() => { setCurrentSupplier(s); setDrawerVisible(true); }}
+                style={{ background: '#fff', borderRadius: 10, padding: '12px 14px', marginBottom: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600, fontSize: 15, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                  <Badge status={st.status} text={st.text} />
+                </div>
+                <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#1677ff', marginBottom: 6 }}>{s.code}</div>
+                <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, color: '#666', gap: 8 }}>
+                  <Tag color={categoryColors[s.category]} style={{ margin: 0, fontSize: 11 }}>{categoryLabels[s.category] || s.category}</Tag>
+                  <Tag color={levelColors[s.level]} style={{ margin: 0, fontSize: 11 }}>{levelLabels[s.level] || s.level}</Tag>
+                  {s.overall_score != null && <span style={{ marginLeft: 'auto', fontWeight: 500 }}>{s.overall_score.toFixed(1)}分</span>}
+                  <RightOutlined style={{ fontSize: 10, color: '#ccc' }} />
+                </div>
+              </div>
+            );
+          })}
+          {suppliers.length === 0 && !isLoading && (
+            <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>暂无供应商</div>
+          )}
+        </div>
+        <div onClick={() => setModalVisible(true)}
+          style={{ position: 'fixed', bottom: 80, right: 20, width: 52, height: 52, borderRadius: 26, background: '#1677ff', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(22,119,255,0.4)', zIndex: 100, fontSize: 22, cursor: 'pointer' }}>
+          <PlusOutlined />
+        </div>
+
+        <Modal title="新建供应商" open={modalVisible} onOk={() => form.validateFields().then((values) => createMutation.mutate(values))} onCancel={() => { setModalVisible(false); form.resetFields(); }} confirmLoading={createMutation.isPending} width={600}>
+          <Form form={form} layout="vertical">
+            <Form.Item name="name" label="供应商名称" rules={[{ required: true, message: '请输入供应商名称' }]}><Input placeholder="请输入供应商名称" /></Form.Item>
+            <Form.Item name="short_name" label="简称"><Input placeholder="请输入简称" /></Form.Item>
+            <Form.Item name="category" label="分类" rules={[{ required: true, message: '请选择分类' }]}><Select placeholder="请选择分类" options={categoryOptions} /></Form.Item>
+            <Form.Item name="city" label="城市"><Input placeholder="深圳" /></Form.Item>
+            <Form.Item name="business_scope" label="业务范围"><Input.TextArea rows={2} placeholder="主营业务描述" /></Form.Item>
+          </Form>
+        </Modal>
+
+        <Drawer title={detail?.name || '供应商详情'} open={drawerVisible} onClose={() => { setDrawerVisible(false); setCurrentSupplier(null); }} width="100%">
+          {detail && (
+            <Descriptions column={1} bordered size="small">
+              <Descriptions.Item label="编码">{detail.code}</Descriptions.Item>
+              <Descriptions.Item label="名称">{detail.name}</Descriptions.Item>
+              <Descriptions.Item label="分类"><Tag color={categoryColors[detail.category]}>{categoryLabels[detail.category]}</Tag></Descriptions.Item>
+              <Descriptions.Item label="等级"><Tag color={levelColors[detail.level]}>{levelLabels[detail.level]}</Tag></Descriptions.Item>
+              <Descriptions.Item label="状态"><Badge status={statusMap[detail.status]?.status || 'default'} text={statusMap[detail.status]?.text || detail.status} /></Descriptions.Item>
+              <Descriptions.Item label="综合评分">{detail.overall_score?.toFixed(1) || '-'}</Descriptions.Item>
+              <Descriptions.Item label="城市">{detail.city || '-'}</Descriptions.Item>
+              <Descriptions.Item label="业务范围">{detail.business_scope || '-'}</Descriptions.Item>
+              <Descriptions.Item label="付款条件">{detail.payment_terms || '-'}</Descriptions.Item>
+            </Descriptions>
+          )}
+        </Drawer>
+      </div>
+    );
+  }
+
+  // ========== Desktop Layout ==========
   return (
     <div>
       <Card

@@ -449,16 +449,12 @@ const EBOMEditableTable: React.FC<EBOMEditableTableProps> = ({
             onClick={() => handleAdd('pcb')}>
             添加PCB
           </Button>
-          <Button size="small" icon={<PlusOutlined />} style={{ borderColor: '#ffd666', color: '#d48806' }}
-            onClick={() => handleAdd('service')}>
-            添加贴片服务
-          </Button>
         </div>
       )}
 
       {/* Empty state */}
       {items.length === 0 && !isEdit && (
-        <Empty description="暂无电子BOM数据" />
+        <Empty description="暂无工程BOM数据" />
       )}
 
       {/* Sections */}

@@ -2,16 +2,23 @@ package entity
 
 import "time"
 
-// ProjectBOM 项目BOM（研发BOM，关联项目+阶段）
+// ProjectBOM 项目BOM（三级BOM: EBOM/PBOM/MBOM）
 type ProjectBOM struct {
 	ID            string     `json:"id" gorm:"primaryKey;size:32"`
 	ProjectID     string     `json:"project_id" gorm:"size:32;not null"`
 	PhaseID       *string    `json:"phase_id" gorm:"size:32"`
 	TaskID        *string    `json:"task_id" gorm:"size:32;index"`
-	BOMType       string     `json:"bom_type" gorm:"size:16;not null;default:EBOM"` // EBOM/SBOM/OBOM/FWBOM
-	Version       string     `json:"version" gorm:"size:16;not null;default:v1.0"`
+	BOMType       string     `json:"bom_type" gorm:"size:16;not null;default:EBOM"` // EBOM / PBOM / MBOM
+	SourceBOMID   *string    `json:"source_bom_id,omitempty" gorm:"size:32"`        // 上游BOM ID (PBOM→EBOM, MBOM→EBOM)
+	SourceVersion string     `json:"source_version,omitempty" gorm:"size:20"`       // 上游BOM版本号
+	Version       string     `json:"version" gorm:"size:20;not null;default:''"`
+	VersionMajor  int        `json:"version_major" gorm:"default:0"`
+	VersionMinor  int        `json:"version_minor" gorm:"default:0"`
 	Name          string     `json:"name" gorm:"size:128;not null"`
-	Status        string     `json:"status" gorm:"size:16;not null;default:draft"` // draft/pending_review/published/frozen/rejected
+	Status        string     `json:"status" gorm:"size:16;not null;default:draft"` // draft/released/obsolete
+	ReleaseNote   string     `json:"release_note,omitempty" gorm:"type:text;default:''"`
+	ReleasedAt    *time.Time `json:"released_at,omitempty"`
+	ReleasedBy    *string    `json:"released_by,omitempty" gorm:"size:32"`
 	Description   string     `json:"description,omitempty"`
 	SubmittedBy   *string    `json:"submitted_by,omitempty" gorm:"size:32"`
 	SubmittedAt   *time.Time `json:"submitted_at,omitempty"`
@@ -22,7 +29,6 @@ type ProjectBOM struct {
 	ApprovedAt    *time.Time `json:"approved_at,omitempty"`
 	FrozenAt      *time.Time `json:"frozen_at,omitempty"`
 	FrozenBy      *string    `json:"frozen_by,omitempty" gorm:"size:32"`
-	ParentBOMID   *string    `json:"parent_bom_id,omitempty" gorm:"size:32"`
 	TotalItems    int        `json:"total_items" gorm:"default:0"`
 	EstimatedCost *float64   `json:"estimated_cost,omitempty" gorm:"type:numeric(15,4)"`
 	CreatedBy     string     `json:"created_by" gorm:"size:32;not null"`
@@ -30,111 +36,157 @@ type ProjectBOM struct {
 	UpdatedAt     time.Time  `json:"updated_at"`
 
 	// Relations
-	Project   *Project       `json:"project,omitempty" gorm:"foreignKey:ProjectID"`
-	Phase     *ProjectPhase  `json:"phase,omitempty" gorm:"foreignKey:PhaseID"`
+	Project   *Project         `json:"project,omitempty" gorm:"foreignKey:ProjectID"`
+	Phase     *ProjectPhase    `json:"phase,omitempty" gorm:"foreignKey:PhaseID"`
 	Items     []ProjectBOMItem `json:"items,omitempty" gorm:"foreignKey:BOMID"`
-	Submitter *User          `json:"submitter,omitempty" gorm:"foreignKey:SubmittedBy"`
-	Reviewer  *User          `json:"reviewer,omitempty" gorm:"foreignKey:ReviewedBy"`
-	Creator   *User          `json:"creator,omitempty" gorm:"foreignKey:CreatedBy"`
+	Submitter *User            `json:"submitter,omitempty" gorm:"foreignKey:SubmittedBy"`
+	Reviewer  *User            `json:"reviewer,omitempty" gorm:"foreignKey:ReviewedBy"`
+	Creator   *User            `json:"creator,omitempty" gorm:"foreignKey:CreatedBy"`
+	SourceBOM *ProjectBOM      `json:"source_bom,omitempty" gorm:"foreignKey:SourceBOMID"`
 }
 
 func (ProjectBOM) TableName() string {
 	return "project_boms"
 }
 
-// ProjectBOMItem BOM行项
+// ProjectBOMItem BOM行项（精简固定列 + JSONB扩展属性）
 type ProjectBOMItem struct {
-	ID              string   `json:"id" gorm:"primaryKey;size:32"`
-	BOMID           string   `json:"bom_id" gorm:"size:32;not null"`
-	ItemNumber      int      `json:"item_number" gorm:"default:0"`
-	ParentItemID    *string  `json:"parent_item_id,omitempty" gorm:"size:32"`
-	Level           int      `json:"level" gorm:"not null;default:0"`
-	MaterialID      *string  `json:"material_id,omitempty" gorm:"size:32"`
-	Category        string   `json:"category,omitempty" gorm:"size:32"`
-	Name            string   `json:"name" gorm:"size:128;not null"`
-	Specification   string   `json:"specification,omitempty"`
-	Quantity        float64  `json:"quantity" gorm:"type:numeric(15,4);not null;default:1"`
-	Unit            string   `json:"unit" gorm:"size:16;not null;default:pcs"`
-	Reference       string   `json:"reference,omitempty" gorm:"size:256"`
-	Manufacturer    string   `json:"manufacturer,omitempty" gorm:"size:128"`
-	ManufacturerPN  string   `json:"manufacturer_pn,omitempty" gorm:"size:64"`
-	Supplier        string   `json:"supplier,omitempty" gorm:"size:128"`
-	SupplierPN      string   `json:"supplier_pn,omitempty" gorm:"size:64"`
-	UnitPrice       *float64 `json:"unit_price,omitempty" gorm:"type:numeric(15,4)"`
-	ExtendedCost    *float64 `json:"extended_cost,omitempty" gorm:"type:numeric(15,4)"`
-	LeadTimeDays    *int     `json:"lead_time_days,omitempty"`
-	ProcurementType string   `json:"procurement_type" gorm:"size:16;not null;default:buy"`
-	MOQ             *int     `json:"moq,omitempty"`
-	ApprovedVendors *string  `json:"approved_vendors,omitempty" gorm:"type:jsonb"`
-	LifecycleStatus string   `json:"lifecycle_status,omitempty" gorm:"size:16;default:active"`
-	IsCritical      bool     `json:"is_critical" gorm:"default:false"`
-	IsAlternative   bool     `json:"is_alternative" gorm:"default:false"`
-	AlternativeFor  *string  `json:"alternative_for,omitempty" gorm:"size:32"`
-	Notes           string   `json:"notes,omitempty"`
+	ID           string  `json:"id" gorm:"primaryKey;size:32"`
+	BOMID        string  `json:"bom_id" gorm:"size:32;not null"`
+	ItemNumber   int     `json:"item_number" gorm:"default:0"`
+	ParentItemID *string `json:"parent_item_id,omitempty" gorm:"size:32"`
+	Level        int     `json:"level" gorm:"not null;default:0"`
+	MaterialID   *string `json:"material_id,omitempty" gorm:"size:32"`
 
-	// 结构BOM专属字段
-	MaterialType     string   `json:"material_type,omitempty" gorm:"size:64"`          // 材质：PC, ABS, PA66+GF30, 铝合金6061, 不锈钢304, 硅胶
-	Color            string   `json:"color,omitempty" gorm:"size:64"`                  // 颜色/外观：磨砂黑, Pantone Black 6C
-	SurfaceTreatment string   `json:"surface_treatment,omitempty" gorm:"size:128"`     // 表面处理：阳极氧化, 喷涂, 电镀, 丝印, UV转印, PVD
-	ProcessType      string   `json:"process_type,omitempty" gorm:"size:32"`           // 工艺类型：注塑, CNC, 冲压, 模切, 3D打印, 激光切割
-	DrawingNo        string   `json:"drawing_no,omitempty" gorm:"size:64"`             // 图纸编号
-	// Deprecated: use PartDrawing table instead
-	Drawing2DFileID  *string  `json:"drawing_2d_file_id,omitempty" gorm:"column:drawing2d_file_id;size:32"`     // 2D工程图文件ID
-	// Deprecated: use PartDrawing table instead
-	Drawing2DFileName string  `json:"drawing_2d_file_name,omitempty" gorm:"column:drawing2d_file_name;size:256"`  // 2D文件名
-	// Deprecated: use PartDrawing table instead
-	Drawing3DFileID  *string  `json:"drawing_3d_file_id,omitempty" gorm:"column:drawing3d_file_id;size:32"`     // 3D模型文件ID
-	// Deprecated: use PartDrawing table instead
-	Drawing3DFileName string  `json:"drawing_3d_file_name,omitempty" gorm:"column:drawing3d_file_name;size:256"`  // 3D文件名
-	ThumbnailURL      string  `json:"thumbnail_url,omitempty" gorm:"size:512"` // STP缩略图URL
-	WeightGrams      *float64 `json:"weight_grams,omitempty" gorm:"type:numeric(10,2)"` // 重量(克)
-	TargetPrice      *float64 `json:"target_price,omitempty" gorm:"type:numeric(15,4)"` // 目标单价
-	ToolingEstimate  *float64 `json:"tooling_estimate,omitempty" gorm:"type:numeric(15,2)"` // 模具费预估
-	CostNotes        string   `json:"cost_notes,omitempty" gorm:"type:text"`           // 成本备注
-	IsAppearancePart bool     `json:"is_appearance_part" gorm:"default:false"`          // 是否外观件
-	AssemblyMethod   string   `json:"assembly_method,omitempty" gorm:"size:32"`        // 装配方式：卡扣, 螺丝, 胶合, 超声波焊接, 热熔
-	ToleranceGrade   string   `json:"tolerance_grade,omitempty" gorm:"size:32"`        // 公差等级：普通/精密/超精密
-	IsVariant        bool     `json:"is_variant" gorm:"default:false"`                // 标记该件在SKU间可能不同
-	SamplingReady    bool     `json:"sampling_ready" gorm:"default:false"`             // 是否就绪可进入SRM打样
+	// 两层分类
+	Category    string `json:"category" gorm:"size:32;not null"`     // 大类: electronic/structural/optical/packaging/tooling/consumable
+	SubCategory string `json:"sub_category" gorm:"size:32;not null"` // 小类: component/pcb/connector/cable/housing/internal/fastener/lens/lightguide/light_engine/waveguide/box/document/cushion/mold/fixture/consumable
 
-	// EBOM专用字段
-	ItemType            string   `json:"item_type,omitempty" gorm:"size:20;default:component"`      // component | pcb | service | material
-	Designator          string   `json:"designator,omitempty" gorm:"size:500"`                       // 元器件位号 R1,R2,R3
-	Package             string   `json:"package,omitempty" gorm:"column:package;size:50"`             // 封装 0402/QFN48
-	PCBLayers           *int     `json:"pcb_layers,omitempty" gorm:"column:pcb_layers"`               // PCB层数
-	PCBThickness        string   `json:"pcb_thickness,omitempty" gorm:"size:20"`                      // 板厚
-	PCBMaterial         string   `json:"pcb_material,omitempty" gorm:"size:50"`                       // 板材 FR4
-	PCBDimensions       string   `json:"pcb_dimensions,omitempty" gorm:"size:50"`                     // 尺寸 50x30mm
-	PCBSurfaceFinish    string   `json:"pcb_surface_finish,omitempty" gorm:"size:50"`                 // 表面工艺 沉金/喷锡
-	ServiceType         string   `json:"service_type,omitempty" gorm:"size:50"`                       // 服务类型
-	ProcessRequirements string   `json:"process_requirements,omitempty" gorm:"type:text"`             // 加工工艺要求
-	Attachments         string   `json:"attachments,omitempty" gorm:"type:jsonb;default:'[]'"`        // 附件 [{file_id,file_name,file_type,url}]
+	// 通用固定列（7个显示列）
+	Name         string   `json:"name" gorm:"size:128;not null"`
+	Quantity     float64  `json:"quantity" gorm:"type:numeric(15,4);not null;default:1"`
+	Unit         string   `json:"unit" gorm:"size:16;not null;default:pcs"`
+	Supplier     string   `json:"supplier,omitempty" gorm:"size:128"`
+	UnitPrice    *float64 `json:"unit_price,omitempty" gorm:"type:numeric(15,4)"`
+	ExtendedCost *float64 `json:"extended_cost,omitempty" gorm:"type:numeric(15,4)"`
+	Notes        string   `json:"notes,omitempty"`
 
-	// PBOM包装BOM专用字段
-	PrintProcess     string `json:"print_process,omitempty" gorm:"size:50"`          // 印刷工艺：四色/专色/黑白
-	SurfaceFinishPkg string `json:"surface_finish_pkg,omitempty" gorm:"size:50"`     // 表面处理：覆膜亮/覆膜哑/UV
-	DesignFileID     string `json:"design_file_id,omitempty" gorm:"size:100"`        // 设计稿文件ID
-	DesignFileName   string `json:"design_file_name,omitempty" gorm:"size:200"`      // 设计稿文件名
-	DieCutFileID     string `json:"die_cut_file_id,omitempty" gorm:"size:100"`       // 刀模图文件ID
-	DieCutFileName   string `json:"die_cut_file_name,omitempty" gorm:"size:200"`     // 刀模图文件名
-	IsMultilang      bool   `json:"is_multilang" gorm:"default:false"`               // 是否多语言件
-	PackingQty       *int   `json:"packing_qty,omitempty"`                           // 装箱数量(几台/箱)
-	LanguageCode     string `json:"language_code,omitempty" gorm:"size:20"`          // 语言版本：通用/中国/美国/日本等
+	// 品类专属扩展属性（JSONB，按属性模板定义的字段存值）
+	ExtendedAttrs JSONB `json:"extended_attrs,omitempty" gorm:"type:jsonb;default:'{}'"`
 
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	// PBOM/MBOM专用
+	ProcessStepID *string    `json:"process_step_id,omitempty" gorm:"size:32"`
+	ScrapRate     *float64   `json:"scrap_rate,omitempty" gorm:"type:numeric(5,4)"`
+	EffectiveDate *time.Time `json:"effective_date,omitempty"`
+	ExpireDate    *time.Time `json:"expire_date,omitempty"`
+
+	// 替代料
+	IsAlternative  bool    `json:"is_alternative" gorm:"default:false"`
+	AlternativeFor *string `json:"alternative_for,omitempty" gorm:"size:32"`
+
+	// 附件
+	Attachments  string `json:"attachments,omitempty" gorm:"type:jsonb;default:'[]'"`
+	ThumbnailURL string `json:"thumbnail_url,omitempty" gorm:"size:512"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Relations
-	Material     *Material              `json:"material,omitempty" gorm:"foreignKey:MaterialID"`
-	ParentItem   *ProjectBOMItem        `json:"parent_item,omitempty" gorm:"foreignKey:ParentItemID"`
-	Children     []ProjectBOMItem       `json:"children,omitempty" gorm:"foreignKey:ParentItemID"`
-	Drawings     []PartDrawing          `json:"drawings,omitempty" gorm:"foreignKey:BOMItemID"`
-	CMFVariants  []BOMItemCMFVariant    `json:"cmf_variants,omitempty" gorm:"foreignKey:BOMItemID"`
-	LangVariants []BOMItemLangVariant   `json:"lang_variants,omitempty" gorm:"foreignKey:BOMItemID"`
+	Material     *Material           `json:"material,omitempty" gorm:"foreignKey:MaterialID"`
+	ParentItem   *ProjectBOMItem     `json:"parent_item,omitempty" gorm:"foreignKey:ParentItemID"`
+	Children     []ProjectBOMItem    `json:"children,omitempty" gorm:"foreignKey:ParentItemID"`
+	Drawings     []PartDrawing       `json:"drawings,omitempty" gorm:"foreignKey:BOMItemID"`
+	CMFVariants  []BOMItemCMFVariant `json:"cmf_variants,omitempty" gorm:"foreignKey:BOMItemID"`
+	LangVariants []BOMItemLangVariant `json:"lang_variants,omitempty" gorm:"foreignKey:BOMItemID"`
+	ProcessStep  *ProcessStep        `json:"process_step,omitempty" gorm:"foreignKey:ProcessStepID"`
 }
 
 func (ProjectBOMItem) TableName() string {
 	return "project_bom_items"
+}
+
+// CategoryAttrTemplate 品类属性模板（定义每个sub_category的扩展字段）
+type CategoryAttrTemplate struct {
+	ID           string    `json:"id" gorm:"primaryKey;size:32"`
+	Category     string    `json:"category" gorm:"size:32;not null;index:idx_cat_sub"`
+	SubCategory  string    `json:"sub_category" gorm:"size:32;not null;index:idx_cat_sub"`
+	BOMType      string    `json:"bom_type" gorm:"size:16;not null;default:EBOM"` // EBOM/PBOM — which BOM type this category belongs to
+	FieldKey     string    `json:"field_key" gorm:"size:64;not null"`
+	FieldName    string    `json:"field_name" gorm:"size:64;not null"`
+	FieldType    string    `json:"field_type" gorm:"size:16;not null"` // text/number/select/boolean/file/thumbnail
+	Unit         string    `json:"unit,omitempty" gorm:"size:16"`
+	Required     bool      `json:"required" gorm:"default:false"`
+	Options      JSONB     `json:"options,omitempty" gorm:"type:jsonb"`    // select options {"values":["A","B"]}
+	Validation   JSONB     `json:"validation,omitempty" gorm:"type:jsonb"` // {min,max,pattern}
+	DefaultValue string    `json:"default_value,omitempty" gorm:"size:128"`
+	SortOrder    int       `json:"sort_order" gorm:"default:0"`
+	ShowInTable  bool      `json:"show_in_table" gorm:"default:true"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+func (CategoryAttrTemplate) TableName() string {
+	return "category_attr_templates"
+}
+
+// ProcessRoute 工艺路线
+type ProcessRoute struct {
+	ID          string    `json:"id" gorm:"primaryKey;size:32"`
+	ProjectID   string    `json:"project_id" gorm:"size:32;not null"`
+	BOMID       string    `json:"bom_id" gorm:"size:32"`
+	Name        string    `json:"name" gorm:"size:128;not null"`
+	Version     string    `json:"version" gorm:"size:16;default:v1.0"`
+	Status      string    `json:"status" gorm:"size:16;default:draft"` // draft/active/obsolete
+	Description string    `json:"description" gorm:"type:text"`
+	TotalSteps  int       `json:"total_steps" gorm:"default:0"`
+	CreatedBy   string    `json:"created_by" gorm:"size:32;not null"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+
+	Steps []ProcessStep `json:"steps,omitempty" gorm:"foreignKey:RouteID"`
+}
+
+func (ProcessRoute) TableName() string {
+	return "process_routes"
+}
+
+// ProcessStep 工艺步骤
+type ProcessStep struct {
+	ID             string   `json:"id" gorm:"primaryKey;size:32"`
+	RouteID        string   `json:"route_id" gorm:"size:32;not null"`
+	StepNumber     int      `json:"step_number" gorm:"not null"`
+	Name           string   `json:"name" gorm:"size:128;not null"`
+	WorkCenter     string   `json:"work_center,omitempty" gorm:"size:64"`
+	Description    string   `json:"description,omitempty" gorm:"type:text"`
+	StdTimeMinutes float64  `json:"std_time_minutes" gorm:"type:numeric(10,2)"`
+	SetupMinutes   float64  `json:"setup_minutes" gorm:"type:numeric(10,2)"`
+	LaborCost      *float64 `json:"labor_cost,omitempty" gorm:"type:numeric(15,4)"`
+	SortOrder      int      `json:"sort_order" gorm:"not null;default:0"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+
+	Materials []ProcessStepMaterial `json:"materials,omitempty" gorm:"foreignKey:StepID"`
+}
+
+func (ProcessStep) TableName() string {
+	return "process_steps"
+}
+
+// ProcessStepMaterial 工序-物料关联
+type ProcessStepMaterial struct {
+	ID         string    `json:"id" gorm:"primaryKey;size:32"`
+	StepID     string    `json:"step_id" gorm:"size:32;not null"`
+	MaterialID string    `json:"material_id" gorm:"size:32"`
+	Name       string    `json:"name" gorm:"size:128"`
+	Category   string    `json:"category" gorm:"size:32;not null"` // tooling/consumable/service
+	Quantity   float64   `json:"quantity" gorm:"type:numeric(15,4);default:1"`
+	Unit       string    `json:"unit" gorm:"size:16;default:pcs"`
+	Notes      string    `json:"notes,omitempty" gorm:"type:text"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+func (ProcessStepMaterial) TableName() string {
+	return "process_step_materials"
 }
 
 // BOMRelease BOM发布快照（ERP对接用）

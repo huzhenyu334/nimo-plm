@@ -44,6 +44,7 @@ import { templateApi, TemplateTask, TemplateVersion } from '@/api/templates';
 import { codenameApi, Codename } from '@/api/codenames';
 import { approvalDefinitionApi } from '@/api/approvalDefinitions';
 import { taskFormApi, TaskFormField } from '@/api/taskForms';
+import BOMConfigPanel from '@/components/BOM/BOMConfigPanel';
 import UserSelect from '@/components/UserSelect';
 import { taskRoleApi, TaskRole } from '@/constants/roles';
 import { useAuth } from '@/contexts/AuthContext';
@@ -526,14 +527,7 @@ const TemplateDetail: React.FC = () => {
   const deleteTask = useCallback(
     (key: string) => {
       if (isReadOnly) return;
-      setTasks((prev) => {
-        const taskToDelete = prev.find(t => t._key === key);
-        if (!taskToDelete) return prev.filter((t) => t._key !== key);
-
-        // Also remove any SRM procurement task linked to this task
-        const srmTaskCode = `SRM-${taskToDelete.task_code}`;
-        return prev.filter((t) => t._key !== key && !(t.task_type === 'srm_procurement' && t.task_code === srmTaskCode));
-      });
+      setTasks((prev) => prev.filter((t) => t._key !== key));
       markChanged();
     },
     [markChanged, isReadOnly]
@@ -979,7 +973,9 @@ const TemplateDetail: React.FC = () => {
     { value: 'checkbox', label: '复选框' },
     { value: 'user', label: '用户选择' },
     { value: 'role_assignment', label: '角色分配' },
-    { value: 'bom_upload', label: 'BOM上传' },
+    { value: 'ebom_control', label: 'EBOM控件' },
+    { value: 'pbom_control', label: 'PBOM控件' },
+    { value: 'mbom_control', label: 'MBOM控件' },
     { value: 'cmf', label: 'CMF配色' },
     { value: 'tooling_list', label: '治具清单' },
     { value: 'consumable_list', label: '组装辅料' },
@@ -1028,53 +1024,6 @@ const TemplateDetail: React.FC = () => {
         name: '完成表单',
         fields: formFields,
       });
-
-      // Check for bom_upload field changes → auto-create/remove SRM procurement task
-      const oldFields = templateForms[formConfigTask.task_code] || [];
-      const hadBomUpload = oldFields.some(f => f.type === 'bom_upload');
-      const hasBomUpload = formFields.some(f => f.type === 'bom_upload');
-
-      if (!hadBomUpload && hasBomUpload) {
-        // bom_upload added → create SRM procurement task
-        const srmTaskCode = `SRM-${formConfigTask.task_code}`;
-        const existingSrmTask = tasks.find(t => t.task_type === 'srm_procurement' && t.task_code === srmTaskCode);
-
-        if (!existingSrmTask) {
-          const phaseTasks = tasks.filter(t => t.phase === formConfigTask.phase);
-          const maxOrder = phaseTasks.length > 0 ? Math.max(...phaseTasks.map(t => t.sort_order)) : 0;
-
-          const newKey = `srm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          const newTask: TaskRow = {
-            _key: newKey,
-            task_code: srmTaskCode,
-            name: '打样采购',
-            phase: formConfigTask.phase,
-            task_type: 'srm_procurement',
-            parent_task_code: '',
-            default_assignee_role: '采购',
-            estimated_days: 7,
-            is_critical: false,
-            requires_approval: false,
-            auto_create_feishu_task: false,
-            feishu_approval_code: '',
-            sort_order: maxOrder + 1,
-            is_locked: true,
-            _depends_on: [formConfigTask.task_code],
-          };
-          setTasks(prev => [...prev, newTask]);
-          markChanged();
-          msg.info('已自动创建「打样采购」任务，依赖于当前BOM任务');
-        }
-      } else if (hadBomUpload && !hasBomUpload) {
-        // bom_upload removed → remove associated SRM procurement task
-        const srmTaskCode = `SRM-${formConfigTask.task_code}`;
-        const srmTask = tasks.find(t => t.task_type === 'srm_procurement' && t.task_code === srmTaskCode);
-        if (srmTask) {
-          setTasks(prev => prev.filter(t => t.task_code !== srmTaskCode));
-          markChanged();
-          msg.info('已自动移除关联的「打样采购」任务');
-        }
-      }
 
       setTemplateForms(prev => ({ ...prev, [formConfigTask.task_code]: formFields }));
       msg.success('表单配置已保存');
@@ -1361,12 +1310,11 @@ const TemplateDetail: React.FC = () => {
 
                   {phaseTasks.map((task) => {
                     const isMilestone = task.task_type === 'MILESTONE';
-                    const isSrmTask = task.task_type === 'srm_procurement';
                     const isTaskLocked = !!task.is_locked;
                     const isSubtask = !!task.parent_task_code;
                     const depth = (task as any)._depth || 0;
                     const canHaveChildren =
-                      !isSrmTask && (task.task_type === 'MILESTONE' || task.task_type === 'TASK');
+                      task.task_type === 'MILESTONE' || task.task_type === 'TASK';
 
                     // Task type options: subtasks cannot become MILESTONE
                     const typeOptions = isSubtask
@@ -1387,8 +1335,6 @@ const TemplateDetail: React.FC = () => {
                           borderBottom: '1px solid #f0f0f0',
                           background: isReadOnly
                             ? '#f9f9f9'
-                            : isSrmTask
-                            ? '#f0f5ff'
                             : depth > 0
                             ? '#fcfcfc'
                             : isMilestone
@@ -1442,14 +1388,6 @@ const TemplateDetail: React.FC = () => {
 
                         {/* Task Name */}
                         <div className="editable-name-trigger" style={{ flex: 1, minWidth: 150, display: 'flex', alignItems: 'center', gap: 4 }}>
-                          {isSrmTask && (
-                            <>
-                              <Tag color="blue" style={{ margin: 0, fontSize: 11, lineHeight: '18px', flexShrink: 0 }}>采购任务</Tag>
-                              <Tooltip title="此任务由系统自动管理，不可编辑">
-                                <LockOutlined style={{ color: '#999', fontSize: 12, flexShrink: 0 }} />
-                              </Tooltip>
-                            </>
-                          )}
                           <EditableText
                             value={task.name}
                             onChange={(val) => updateTask(task._key, 'name', val)}
@@ -1462,7 +1400,7 @@ const TemplateDetail: React.FC = () => {
                         {/* Task Type */}
                         <div style={{ width: 100, flexShrink: 0 }}>
                           <EditableSelect
-                            value={isSrmTask ? '采购' : task.task_type}
+                            value={task.task_type}
                             onChange={(val) =>
                               updateTask(task._key, 'task_type', val as TaskRow['task_type'])
                             }
@@ -1812,28 +1750,21 @@ const TemplateDetail: React.FC = () => {
                     />
                   </div>
                 )}
-                {field.type === 'bom_upload' && (
+                {['ebom_control', 'pbom_control', 'mbom_control'].includes(field.type) && (
                   <div style={{ marginTop: 8 }}>
-                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>BOM类型</Text>
-                    <Select
-                      size="small"
-                      style={{ width: '100%' }}
-                      value={field.bom_type || 'EBOM'}
-                      onChange={(val) => updateFormField(idx, { bom_type: val })}
-                      options={[
-                        { value: 'EBOM', label: '电子BOM (EBOM)' },
-                        { value: 'SBOM', label: '结构BOM (SBOM)' },
-                        { value: 'PBOM', label: '包装BOM (PBOM)' },
-                      ]}
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
+                      {field.type === 'ebom_control' ? 'EBOM' : field.type === 'pbom_control' ? 'PBOM' : 'MBOM'} 控件配置
+                    </Text>
+                    <BOMConfigPanel
+                      bomType={field.type === 'ebom_control' ? 'EBOM' : field.type === 'pbom_control' ? 'PBOM' : 'MBOM'}
+                      config={field.config || {}}
+                      onChange={(config) => updateFormField(idx, { config })}
                     />
-                    <div style={{ marginTop: 4, padding: '4px 8px', background: '#e6f7ff', borderRadius: 4 }}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>支持 .rep (PADS) 和 .xlsx/.xls (Excel) 格式，上传后自动解析预览BOM物料清单</Text>
-                    </div>
                   </div>
                 )}
                 {field.type === 'cmf' && (
                   <div style={{ marginTop: 8 }}>
-                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>关联SBOM来源任务</Text>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>关联EBOM来源任务</Text>
                     <Select
                       size="small"
                       style={{ width: '100%' }}
@@ -1844,12 +1775,12 @@ const TemplateDetail: React.FC = () => {
                       options={tasks
                         .filter((t) => {
                           const fields = templateForms[t.task_code] || [];
-                          return fields.some((f) => f.type === 'bom_upload');
+                          return fields.some((f) => ['bom_upload', 'ebom_control', 'pbom_control', 'mbom_control'].includes(f.type));
                         })
                         .map((t) => ({ value: t.task_code, label: `${t.name} (${t.task_code})` }))}
                     />
                     <div style={{ marginTop: 4, padding: '4px 8px', background: '#f6ffed', borderRadius: 4 }}>
-                      <Text type="secondary" style={{ fontSize: 11 }}>CMF配色控件将从所选任务的SBOM中提取外观件，自动生成配色表</Text>
+                      <Text type="secondary" style={{ fontSize: 11 }}>CMF配色控件将从所选任务的EBOM中提取外观件，自动生成配色表</Text>
                     </div>
                   </div>
                 )}
@@ -1868,7 +1799,7 @@ const TemplateDetail: React.FC = () => {
                       options={tasks
                         .filter((t) => {
                           const fs = templateForms[t.task_code] || [];
-                          return fs.some((f) => ['tooling_list', 'consumable_list', 'bom_upload'].includes(f.type));
+                          return fs.some((f) => ['tooling_list', 'consumable_list', 'bom_upload', 'ebom_control', 'pbom_control', 'mbom_control'].includes(f.type));
                         })
                         .map((t) => ({ value: t.task_code, label: `${t.name} (${t.task_code})` }))}
                     />
@@ -1883,11 +1814,56 @@ const TemplateDetail: React.FC = () => {
                           value={field.source_field_keys || []}
                           onChange={(val) => updateFormField(idx, { source_field_keys: val })}
                           options={(templateForms[field.source_task_code] || [])
-                            .filter((f) => ['tooling_list', 'consumable_list', 'bom_upload'].includes(f.type))
+                            .filter((f) => ['tooling_list', 'consumable_list', 'bom_upload', 'ebom_control', 'pbom_control', 'mbom_control'].includes(f.type))
                             .map((f) => ({ value: f.key, label: `${f.label} (${f.type})` }))}
                         />
                       </div>
                     )}
+                    <div style={{ marginTop: 4 }}>
+                      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 2 }}>BOM分类筛选（留空=全部）</Text>
+                      <Select
+                        size="small"
+                        mode="multiple"
+                        style={{ width: '100%', marginBottom: 4 }}
+                        placeholder="按大类筛选（电子/结构/光学/包装…）"
+                        value={field.bom_categories || []}
+                        onChange={(val) => updateFormField(idx, { bom_categories: val })}
+                        options={[
+                          { value: 'electronic', label: '电子' },
+                          { value: 'structural', label: '结构' },
+                          { value: 'optical', label: '光学' },
+                          { value: 'packaging', label: '包装' },
+                          { value: 'tooling', label: '工装' },
+                          { value: 'consumable', label: '辅料' },
+                        ]}
+                      />
+                      <Select
+                        size="small"
+                        mode="multiple"
+                        style={{ width: '100%' }}
+                        placeholder="按子类筛选（结构件/紧固件/元器件…）"
+                        value={field.bom_sub_categories || []}
+                        onChange={(val) => updateFormField(idx, { bom_sub_categories: val })}
+                        options={[
+                          { value: 'component', label: '元器件' },
+                          { value: 'pcb', label: 'PCB' },
+                          { value: 'connector', label: '连接器' },
+                          { value: 'cable', label: '线缆' },
+                          { value: 'structural_part', label: '结构件' },
+                          { value: 'fastener', label: '紧固件' },
+                          { value: 'light_engine', label: '光机' },
+                          { value: 'waveguide', label: '波导' },
+                          { value: 'lens', label: '镜片' },
+                          { value: 'lightguide', label: '导光板' },
+                          { value: 'box', label: '彩盒' },
+                          { value: 'document', label: '说明书/卡片' },
+                          { value: 'cushion', label: '内衬/缓冲' },
+                          { value: 'mold', label: '模具' },
+                          { value: 'fixture', label: '治具/检具' },
+                          { value: 'consumable', label: '辅料' },
+                        ]}
+                      />
+                    </div>
                     <div style={{ marginTop: 4, padding: '4px 8px', background: '#fff7e6', borderRadius: 4 }}>
                       <Text type="secondary" style={{ fontSize: 11 }}>任务启动时自动从来源任务提取物料清单，创建SRM采购需求（PR）</Text>
                     </div>

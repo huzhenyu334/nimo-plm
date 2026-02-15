@@ -12,17 +12,17 @@ import {
   Upload,
   Space,
   message,
-  AutoComplete,
   Tooltip,
 } from 'antd';
 import { DeleteOutlined, PlusOutlined, UploadOutlined, CloseCircleOutlined, EyeOutlined, LoadingOutlined, EyeTwoTone, SearchOutlined } from '@ant-design/icons';
 import { taskFormApi } from '@/api/taskForms';
 import type { ColumnsType } from 'antd/es/table';
+import type { CategoryAttrTemplate } from '@/api/projectBom';
 import STLViewer from './STLViewer';
 
 const { Text } = Typography;
 
-// ========== Option Constants ==========
+// ========== Option Constants (kept for backward compat) ==========
 
 export const CATEGORY_OPTIONS = [
   '电子元器件', '结构件', '光学器件', '电池', '线缆/FPC', '包装材料', '标签/外观件', '其他',
@@ -63,16 +63,6 @@ export const TOLERANCE_PRESETS = [
   { label: '超精密 ±0.005mm', value: '0.005' },
 ];
 
-// 格式化公差显示
-const formatTolerance = (v: any): string => {
-  if (v == null || v === '') return '';
-  const num = parseFloat(String(v));
-  if (!isNaN(num)) return `±${num}mm`;
-  // 兼容旧数据
-  const map: Record<string, string> = { '普通': '±0.05mm', '精密': '±0.03mm', '超精密': '±0.005mm' };
-  return map[v] || String(v);
-};
-
 // 格式化文件大小
 const formatFileSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes}B`;
@@ -85,7 +75,7 @@ const formatFileSize = (bytes: number): string => {
 export type BOMItemRecord = Record<string, any>;
 
 export interface BOMEditableTableProps {
-  bomType: 'EBOM' | 'SBOM' | 'MBOM';
+  bomType: 'EBOM' | 'PBOM' | 'MBOM';
   items: BOMItemRecord[];
   onChange: (items: BOMItemRecord[]) => void;
   showAddDelete?: boolean;
@@ -99,6 +89,7 @@ export interface BOMEditableTableProps {
   scrollY?: number;
   noPagination?: boolean;
   rowClassName?: (record: BOMItemRecord) => string;
+  attrTemplates?: CategoryAttrTemplate[];
 }
 
 // ========== Component ==========
@@ -192,10 +183,17 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
   scrollY,
   noPagination = false,
   rowClassName,
+  attrTemplates,
 }) => {
   const [editingCell, setEditingCell] = useState<{ rowIdx: number; field: string } | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [preview3D, setPreview3D] = useState<{ fileId: string; fileName: string } | null>(null);
+
+  // Flatten extended_attrs onto items for display (category-specific fields live in extended_attrs JSONB)
+  const flatItems = React.useMemo(() => items.map(item => ({
+    ...item,
+    ...(item.extended_attrs || {}),
+  })), [items]);
 
   // Convert page-relative index to global array index
   const toGlobalIdx = (pageIdx: number) =>
@@ -203,8 +201,8 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
 
   const handleCellSave = (idx: number, field: string, value: any) => {
     const gi = toGlobalIdx(idx);
-    // Skip save if value unchanged
-    if (items[gi] && items[gi][field] === value) {
+    // Skip save if value unchanged (check flatItems which includes extended_attrs)
+    if (flatItems[gi] && flatItems[gi][field] === value) {
       setEditingCell(null);
       return;
     }
@@ -229,10 +227,6 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
       name: '新零件',
       quantity: 1,
       unit: 'pcs',
-      weight_grams: 0,
-      target_price: 0,
-      tooling_estimate: 0,
-      tolerance_grade: '0.05',
     };
     const newItems = [...items, newItem];
     onChange(newItems);
@@ -265,9 +259,9 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
     if (type === 'select' && options && value) {
       displayValue = options.find(o => o.value === value)?.label?.split('（')[0] || value;
     }
-    if (type === 'number' && (value != null && value !== '') && field === 'target_price') displayValue = `¥${Number(value).toFixed(2)}`;
-    else if (type === 'number' && field === 'tooling_estimate') displayValue = `¥${Number(value || 0).toFixed(2)}`;
-    else if (type === 'number' && (value != null && value !== '') && field === 'unit_price') displayValue = Number(value).toFixed(2);
+    if (type === 'number' && (value != null && value !== '') && (field === 'unit_price' || field === 'extended_cost')) {
+      displayValue = Number(value).toFixed(2);
+    }
 
     // Readonly mode: just show value
     if (readonly) {
@@ -330,85 +324,6 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
     );
   };
 
-  // AutoComplete renderer for material_type
-  const renderMaterialTypeCell = (value: any, idx: number) => {
-    if (readonly) {
-      return (
-        <div style={{ minHeight: 22, padding: '0 2px' }}>
-          {value ?? <Text type="secondary" style={{ fontSize: 11 }}>-</Text>}
-        </div>
-      );
-    }
-    const gi = toGlobalIdx(idx);
-    const isEditing = editingCell?.rowIdx === gi && editingCell?.field === 'material_type';
-    if (isEditing) {
-      return (
-        <AutoComplete
-          size="small"
-          autoFocus
-          defaultValue={value}
-          defaultOpen
-          style={{ width: '100%' }}
-          options={MATERIAL_TYPE_PRESETS.map(m => ({ value: m }))}
-          filterOption={(input, option) =>
-            (option?.value as string)?.toLowerCase().includes(input.toLowerCase())
-          }
-          onSelect={(v) => handleCellSave(idx, 'material_type', v)}
-          onBlur={(e) => handleCellSave(idx, 'material_type', (e.target as HTMLInputElement).value)}
-        />
-      );
-    }
-    return (
-      <div
-        style={{ cursor: 'pointer', minHeight: 22, padding: '0 2px', borderRadius: 2 }}
-        className="editable-cell"
-        onClick={() => setEditingCell({ rowIdx: gi, field: 'material_type' })}
-      >
-        {value ?? <Text type="secondary" style={{ fontSize: 11 }}>-</Text>}
-      </div>
-    );
-  };
-
-  // AutoComplete renderer for tolerance_grade (±mm)
-  const renderToleranceCell = (value: any, idx: number) => {
-    const display = formatTolerance(value);
-    if (readonly) {
-      return (
-        <div style={{ minHeight: 22, padding: '0 2px' }}>
-          {display || <Text type="secondary" style={{ fontSize: 11 }}>-</Text>}
-        </div>
-      );
-    }
-    const gi = toGlobalIdx(idx);
-    const isEditing = editingCell?.rowIdx === gi && editingCell?.field === 'tolerance_grade';
-    if (isEditing) {
-      return (
-        <AutoComplete
-          size="small"
-          autoFocus
-          defaultValue={value != null ? String(value) : ''}
-          defaultOpen
-          style={{ width: '100%' }}
-          options={TOLERANCE_PRESETS}
-          onSelect={(v) => handleCellSave(idx, 'tolerance_grade', v)}
-          onBlur={(e) => {
-            const raw = (e.target as HTMLInputElement).value;
-            handleCellSave(idx, 'tolerance_grade', raw);
-          }}
-        />
-      );
-    }
-    return (
-      <div
-        style={{ cursor: 'pointer', minHeight: 22, padding: '0 2px', borderRadius: 2 }}
-        className="editable-cell"
-        onClick={() => setEditingCell({ rowIdx: gi, field: 'tolerance_grade' })}
-      >
-        {display || <Text type="secondary" style={{ fontSize: 11 }}>-</Text>}
-      </div>
-    );
-  };
-
   // Check if file is a 3D model (STP/STEP)
   const is3DFile = (name: string) => /\.(stp|step)$/i.test(name);
 
@@ -460,15 +375,12 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
           showUploadList={false}
           customRequest={() => {}}
           beforeUpload={(file) => {
-            console.log('[BOM Upload] started:', file.name, 'gi:', gi, 'field:', fileNameField);
             taskFormApi.uploadFile(file).then((result) => {
-              console.log('[BOM Upload] result:', JSON.stringify(result));
               const updateFields: Record<string, any> = {
                 [fileIdField]: result.id,
                 [fileNameField]: result.filename,
                 [fileSizeField]: file.size,
               };
-              // 3D模型上传时，如果返回了缩略图URL，也保存到BOM项
               if (result.thumbnail_url) {
                 updateFields.thumbnail_url = result.thumbnail_url;
               }
@@ -476,11 +388,9 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
                 ...it,
                 ...updateFields,
               } : it);
-              console.log('[BOM Upload] updated item:', JSON.stringify(newItems[gi]));
               onChange(newItems);
               message.success('上传成功');
-            }).catch((err) => {
-              console.error('[BOM Upload] failed:', err);
+            }).catch(() => {
               message.error('上传失败');
             });
             return Upload.LIST_IGNORE;
@@ -503,43 +413,34 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
     );
   };
 
-  // Build columns based on bomType
+  // ========== Build columns ==========
+
+  // Common columns (7 display + item_number)
   const commonCols: ColumnsType<BOMItemRecord> = [
     { title: '序号', dataIndex: 'item_number', width: 55, align: 'center',
       render: (v, _, idx) => renderCell(v, idx, 'item_number', 'number') },
-  ];
-
-  const ebomCols: ColumnsType<BOMItemRecord> = [
-    { title: '位号', dataIndex: 'reference', width: 80,
-      render: (v, _, idx) => renderCell(v, idx, 'reference') },
     { title: '名称', dataIndex: 'name', width: 120,
       render: (v, _, idx) => renderCell(v, idx, 'name') },
-    { title: '规格', dataIndex: 'specification', width: 140, ellipsis: true,
-      render: (v, _, idx) => renderCell(v, idx, 'specification') },
     { title: '数量', dataIndex: 'quantity', width: 60, align: 'right',
       render: (v, _, idx) => renderCell(v, idx, 'quantity', 'number') },
     { title: '单位', dataIndex: 'unit', width: 55,
       render: (v, _, idx) => renderCell(v, idx, 'unit') },
-    { title: '类别', dataIndex: 'category', width: 100,
-      render: (v, _, idx) => renderCell(v, idx, 'category', 'select',
-        CATEGORY_OPTIONS.map(c => ({ label: c, value: c }))) },
-    { title: '单价', dataIndex: 'unit_price', width: 80, align: 'right',
-      render: (v, _, idx) => renderCell(v, idx, 'unit_price', 'number') },
-    { title: '制造商', dataIndex: 'manufacturer', width: 100, ellipsis: true,
-      render: (v, _, idx) => renderCell(v, idx, 'manufacturer') },
-    { title: '制造商料号', dataIndex: 'manufacturer_pn', width: 100, ellipsis: true,
-      render: (v, _, idx) => renderCell(v, idx, 'manufacturer_pn') },
     { title: '供应商', dataIndex: 'supplier', width: 100, ellipsis: true,
       render: (v, _, idx) => renderCell(v, idx, 'supplier') },
-    { title: '交期(天)', dataIndex: 'lead_time_days', width: 75, align: 'right',
-      render: (v, _, idx) => renderCell(v, idx, 'lead_time_days', 'number') },
-    { title: '采购类型', dataIndex: 'procurement_type', width: 100,
-      render: (v, _, idx) => renderCell(v, idx, 'procurement_type', 'select', PROCUREMENT_OPTIONS) },
-    { title: '关键件', dataIndex: 'is_critical', width: 60, align: 'center',
-      render: (v, _, idx) => renderCell(v, idx, 'is_critical', 'checkbox') },
+    { title: '单价', dataIndex: 'unit_price', width: 80, align: 'right',
+      render: (v, _, idx) => renderCell(v, idx, 'unit_price', 'number') },
+    { title: '小计', dataIndex: 'extended_cost', width: 80, align: 'right',
+      render: (v, record) => {
+        const cost = v ?? ((record.quantity || 0) * (record.unit_price || 0));
+        return cost > 0 ? Number(cost).toFixed(2) : <Text type="secondary" style={{ fontSize: 11 }}>-</Text>;
+      },
+    },
+    { title: '备注', dataIndex: 'notes', width: 120, ellipsis: true,
+      render: (v, _, idx) => renderCell(v, idx, 'notes') },
   ];
 
-  const sbomCols: ColumnsType<BOMItemRecord> = [
+  // PBOM-specific columns: thumbnail + 2D/3D drawings
+  const pbomExtraCols: ColumnsType<BOMItemRecord> = bomType === 'PBOM' ? [
     { title: '预览', dataIndex: 'thumbnail_url', width: 70, align: 'center',
       render: (url: string) => url ? (
         <ThumbnailCell url={url} />
@@ -549,16 +450,6 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
         </div>
       ),
     },
-    { title: '名称', dataIndex: 'name', width: 120,
-      render: (v, _, idx) => renderCell(v, idx, 'name') },
-    { title: '数量', dataIndex: 'quantity', width: 60, align: 'right',
-      render: (v, _, idx) => renderCell(v, idx, 'quantity', 'number') },
-    { title: '单位', dataIndex: 'unit', width: 55,
-      render: (v, _, idx) => renderCell(v, idx, 'unit') },
-    { title: '材质', dataIndex: 'material_type', width: 110,
-      render: (v, _, idx) => renderMaterialTypeCell(v, idx) },
-    { title: '工艺类型', dataIndex: 'process_type', width: 90,
-      render: (v, _, idx) => renderCell(v, idx, 'process_type', 'select', PROCESS_TYPE_OPTIONS) },
     { title: '2D图纸', dataIndex: 'drawing_2d_file_name', width: renderDrawingColumn ? 150 : 140,
       render: renderDrawingColumn
         ? (_, record) => renderDrawingColumn(record, '2D')
@@ -569,22 +460,9 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
         ? (_, record) => renderDrawingColumn(record, '3D')
         : (_, record, idx) => renderDrawingUploadCell(record, idx, 'drawing_3d_file_id', 'drawing_3d_file_name', 'drawing_3d_file_size'),
     },
-    { title: '重量(g)', dataIndex: 'weight_grams', width: 75, align: 'right',
-      render: (v, _, idx) => renderCell(v, idx, 'weight_grams', 'number') },
-    { title: '目标价', dataIndex: 'target_price', width: 85, align: 'right',
-      render: (v, _, idx) => renderCell(v, idx, 'target_price', 'number') },
-    { title: '模具费', dataIndex: 'tooling_estimate', width: 85, align: 'right',
-      render: (v, _, idx) => renderCell(v, idx, 'tooling_estimate', 'number') },
-    { title: '外观件', dataIndex: 'is_appearance_part', width: 60, align: 'center',
-      render: (v, _, idx) => renderCell(v, idx, 'is_appearance_part', 'checkbox') },
-    { title: '装配方式', dataIndex: 'assembly_method', width: 90,
-      render: (v, _, idx) => renderCell(v, idx, 'assembly_method', 'select', ASSEMBLY_METHOD_OPTIONS) },
-    { title: '公差', dataIndex: 'tolerance_grade', width: 95,
-      render: (v, _, idx) => renderToleranceCell(v, idx) },
-    { title: '备注', dataIndex: 'notes', width: 120, ellipsis: true,
-      render: (v, _, idx) => renderCell(v, idx, 'notes') },
-  ];
+  ] : [];
 
+  // Material code column (optional)
   const materialCodeCol: ColumnsType<BOMItemRecord> = showMaterialCode ? [
     { title: '物料编码', width: 120,
       render: (_, record) => {
@@ -604,8 +482,42 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
     },
   ] : [];
 
-  const typeCols = bomType === 'SBOM' ? sbomCols : ebomCols;
-  const columns: ColumnsType<BOMItemRecord> = [...commonCols, ...materialCodeCol, ...typeCols];
+  // Dynamic columns from attribute templates (show_in_table only)
+  const templateCols: ColumnsType<BOMItemRecord> = React.useMemo(() => {
+    if (!attrTemplates || attrTemplates.length === 0) return [];
+    return attrTemplates
+      .filter(t => t.show_in_table)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map(t => {
+        const colType = t.field_type === 'number' ? 'number'
+          : t.field_type === 'select' ? 'select'
+          : t.field_type === 'boolean' ? 'checkbox'
+          : 'text';
+        const selectOpts = t.field_type === 'select' && t.options?.values
+          ? (t.options.values as string[]).map((v: string) => ({ label: v, value: v }))
+          : undefined;
+        const title = t.unit ? `${t.field_name}(${t.unit})` : t.field_name;
+        return {
+          title,
+          dataIndex: t.field_key,
+          width: colType === 'checkbox' ? 60 : (colType === 'number' ? 80 : 100),
+          align: (colType === 'checkbox' ? 'center' : colType === 'number' ? 'right' : undefined) as any,
+          ellipsis: colType === 'text',
+          render: (v: any, _: any, idx: number) => renderCell(v, idx, t.field_key, colType as any, selectOpts),
+        };
+      });
+  }, [attrTemplates, readonly, editingCell]);
+
+  // Assemble final columns
+  const columns: ColumnsType<BOMItemRecord> = [
+    ...commonCols.slice(0, 1), // item_number
+    ...materialCodeCol,
+    ...pbomExtraCols.slice(0, 1), // thumbnail (before name)
+    ...commonCols.slice(1, 2), // name
+    ...commonCols.slice(2), // quantity, unit, supplier, unit_price, extended_cost, notes
+    ...pbomExtraCols.slice(1), // 2D/3D drawings
+    ...templateCols,
+  ];
 
   if (actionColumn) {
     columns.push({
@@ -623,7 +535,9 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
     });
   }
 
-  const defaultScrollX = bomType === 'SBOM' ? 1570 : 1100;
+  const baseWidth = bomType === 'PBOM' ? 1100 : 700;
+  const templateWidth = templateCols.reduce((sum, c) => sum + ((c.width as number) || 100), 0);
+  const defaultScrollX = baseWidth + templateWidth;
   const finalScrollX = scrollXProp ?? defaultScrollX;
 
   return (
@@ -635,7 +549,7 @@ const BOMEditableTable: React.FC<BOMEditableTableProps> = ({
       )}
       <Table
         columns={columns}
-        dataSource={items}
+        dataSource={flatItems}
         rowKey={(r, idx) => r.id || String(idx)}
         size="small"
         pagination={noPagination ? false : (items.length > PAGE_SIZE ? {

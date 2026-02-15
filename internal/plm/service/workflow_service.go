@@ -33,6 +33,7 @@ type WorkflowService struct {
 	routingService      *RoutingService
 	taskFormRepo        *repository.TaskFormRepository
 	srmProcurementSvc   *srmsvc.ProcurementService
+	bomRepo             *repository.ProjectBOMRepository
 }
 
 // NewWorkflowService 创建工作流服务
@@ -59,6 +60,11 @@ func (s *WorkflowService) SetTaskFormRepo(repo *repository.TaskFormRepository) {
 // SetSRMProcurementService 注入SRM采购服务
 func (s *WorkflowService) SetSRMProcurementService(svc *srmsvc.ProcurementService) {
 	s.srmProcurementSvc = svc
+}
+
+// SetBOMRepo 注入BOM仓库
+func (s *WorkflowService) SetBOMRepo(repo *repository.ProjectBOMRepository) {
+	s.bomRepo = repo
 }
 
 // AssignTask 指派任务
@@ -563,10 +569,12 @@ func (s *WorkflowService) handleProcurementControl(ctx context.Context, task *en
 
 	// 2. 解析字段定义，找到 procurement_control 类型的字段
 	type formFieldDef struct {
-		Key             string   `json:"key"`
-		Type            string   `json:"type"`
-		SourceTaskCode  string   `json:"source_task_code"`
-		SourceFieldKeys []string `json:"source_field_keys"`
+		Key               string   `json:"key"`
+		Type              string   `json:"type"`
+		SourceTaskCode    string   `json:"source_task_code"`
+		SourceFieldKeys   []string `json:"source_field_keys"`
+		BOMCategories     []string `json:"bom_categories"`
+		BOMSubCategories  []string `json:"bom_sub_categories"`
 	}
 	var fields []formFieldDef
 	if err := json.Unmarshal(formDef.Fields, &fields); err != nil {
@@ -690,6 +698,66 @@ func (s *WorkflowService) handleProcurementControl(ctx context.Context, task *en
 				"field_label": sourceFieldLabelMap[fk],
 				"item_count":  len(itemsList),
 			})
+		}
+
+		// Fallback: if no items from inline form data, try reading from project BOM
+		if len(prItems) == 0 && s.bomRepo != nil {
+			log.Printf("[WorkflowService] 尝试从项目BOM获取物料 (task=%s project=%s)", task.ID, task.ProjectID)
+			// Build category/sub-category filter sets
+			catFilter := map[string]bool{}
+			for _, c := range field.BOMCategories {
+				catFilter[c] = true
+			}
+			subCatFilter := map[string]bool{}
+			for _, sc := range field.BOMSubCategories {
+				subCatFilter[sc] = true
+			}
+			for _, bomType := range []string{"EBOM", "PBOM"} {
+				boms, err := s.bomRepo.ListByProject(ctx, task.ProjectID, bomType, "")
+				if err != nil {
+					continue
+				}
+				for _, bom := range boms {
+					bomDetail, err := s.bomRepo.FindByID(ctx, bom.ID)
+					if err != nil {
+						continue
+					}
+					matchCount := 0
+					for _, item := range bomDetail.Items {
+						// Apply category filters if configured
+						if len(catFilter) > 0 && !catFilter[item.Category] {
+							continue
+						}
+						if len(subCatFilter) > 0 && !subCatFilter[item.SubCategory] {
+							continue
+						}
+						if item.Name != "" && item.Quantity > 0 {
+							spec := ""
+							if item.ExtendedAttrs != nil {
+								if s, ok := item.ExtendedAttrs["specification"].(string); ok {
+									spec = s
+								}
+							}
+							prItems = append(prItems, srmsvc.CreatePRItem{
+								MaterialName:  item.Name,
+								Specification: spec,
+								Quantity:      item.Quantity,
+								Unit:          item.Unit,
+								Notes:         fmt.Sprintf("%s/%s", item.Category, item.SubCategory),
+							})
+							matchCount++
+						}
+					}
+					if matchCount > 0 {
+						sources = append(sources, map[string]interface{}{
+							"task_code":   field.SourceTaskCode,
+							"field_key":   bomType,
+							"field_label": fmt.Sprintf("%s (%d项)", bomType, matchCount),
+							"item_count":  matchCount,
+						})
+					}
+				}
+			}
 		}
 
 		if len(prItems) == 0 {

@@ -107,6 +107,11 @@ func (r *ProjectBOMRepository) DeleteItemsByBOM(ctx context.Context, bomID strin
 	return r.db.WithContext(ctx).Delete(&entity.ProjectBOMItem{}, "bom_id = ?", bomID).Error
 }
 
+// DeleteItemsByBOMAndCategories 删除BOM中指定categories的行项
+func (r *ProjectBOMRepository) DeleteItemsByBOMAndCategories(ctx context.Context, bomID string, categories []string) error {
+	return r.db.WithContext(ctx).Delete(&entity.ProjectBOMItem{}, "bom_id = ? AND category IN ?", bomID, categories).Error
+}
+
 // CountItems 统计BOM行项数
 func (r *ProjectBOMRepository) CountItems(ctx context.Context, bomID string) (int64, error) {
 	var count int64
@@ -201,4 +206,154 @@ func (r *ProjectBOMRepository) FindReleaseByID(ctx context.Context, id string) (
 // UpdateRelease 更新发布快照
 func (r *ProjectBOMRepository) UpdateRelease(ctx context.Context, release *entity.BOMRelease) error {
 	return r.db.WithContext(ctx).Save(release).Error
+}
+
+// === CategoryAttrTemplate Methods ===
+
+// ListTemplates 查询属性模板（按category+sub_category筛选）
+func (r *ProjectBOMRepository) ListTemplates(ctx context.Context, category, subCategory string) ([]entity.CategoryAttrTemplate, error) {
+	var templates []entity.CategoryAttrTemplate
+	query := r.db.WithContext(ctx).Model(&entity.CategoryAttrTemplate{})
+	if category != "" {
+		query = query.Where("category = ?", category)
+	}
+	if subCategory != "" {
+		query = query.Where("sub_category = ?", subCategory)
+	}
+	err := query.Order("sort_order ASC").Find(&templates).Error
+	return templates, err
+}
+
+// CreateTemplate 创建属性模板字段
+func (r *ProjectBOMRepository) CreateTemplate(ctx context.Context, t *entity.CategoryAttrTemplate) error {
+	return r.db.WithContext(ctx).Create(t).Error
+}
+
+// UpdateTemplate 更新属性模板字段
+func (r *ProjectBOMRepository) UpdateTemplate(ctx context.Context, t *entity.CategoryAttrTemplate) error {
+	return r.db.WithContext(ctx).Save(t).Error
+}
+
+// DeleteTemplate 删除属性模板字段
+func (r *ProjectBOMRepository) DeleteTemplate(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Delete(&entity.CategoryAttrTemplate{}, "id = ?", id).Error
+}
+
+// FindTemplateByID 根据ID查找属性模板
+func (r *ProjectBOMRepository) FindTemplateByID(ctx context.Context, id string) (*entity.CategoryAttrTemplate, error) {
+	var t entity.CategoryAttrTemplate
+	if err := r.db.WithContext(ctx).First(&t, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// GetCategoryTree 获取分类树（大类→小类，含item数量）
+func (r *ProjectBOMRepository) GetCategoryTree(ctx context.Context, bomID string) ([]map[string]interface{}, error) {
+	var results []struct {
+		Category    string `json:"category"`
+		SubCategory string `json:"sub_category"`
+		Count       int    `json:"count"`
+	}
+	query := r.db.WithContext(ctx).Model(&entity.ProjectBOMItem{}).
+		Select("category, sub_category, COUNT(*) as count").
+		Group("category, sub_category").
+		Order("category, sub_category")
+	if bomID != "" {
+		query = query.Where("bom_id = ?", bomID)
+	}
+	if err := query.Find(&results).Error; err != nil {
+		return nil, err
+	}
+	var out []map[string]interface{}
+	for _, r := range results {
+		out = append(out, map[string]interface{}{
+			"category":     r.Category,
+			"sub_category": r.SubCategory,
+			"count":        r.Count,
+		})
+	}
+	return out, nil
+}
+
+// === ProcessRoute Methods ===
+
+// CreateRoute 创建工艺路线
+func (r *ProjectBOMRepository) CreateRoute(ctx context.Context, route *entity.ProcessRoute) error {
+	return r.db.WithContext(ctx).Create(route).Error
+}
+
+// FindRouteByID 根据ID查找工艺路线
+func (r *ProjectBOMRepository) FindRouteByID(ctx context.Context, id string) (*entity.ProcessRoute, error) {
+	var route entity.ProcessRoute
+	err := r.db.WithContext(ctx).
+		Preload("Steps", func(db *gorm.DB) *gorm.DB { return db.Order("sort_order ASC") }).
+		Preload("Steps.Materials").
+		First(&route, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &route, nil
+}
+
+// ListRoutesByProject 获取项目的工艺路线列表
+func (r *ProjectBOMRepository) ListRoutesByProject(ctx context.Context, projectID string) ([]entity.ProcessRoute, error) {
+	var routes []entity.ProcessRoute
+	err := r.db.WithContext(ctx).
+		Where("project_id = ?", projectID).
+		Order("created_at DESC").
+		Find(&routes).Error
+	return routes, err
+}
+
+// UpdateRoute 更新工艺路线
+func (r *ProjectBOMRepository) UpdateRoute(ctx context.Context, route *entity.ProcessRoute) error {
+	return r.db.WithContext(ctx).Save(route).Error
+}
+
+// CreateStep 创建工序
+func (r *ProjectBOMRepository) CreateStep(ctx context.Context, step *entity.ProcessStep) error {
+	return r.db.WithContext(ctx).Create(step).Error
+}
+
+// FindStepByID 根据ID查找工序
+func (r *ProjectBOMRepository) FindStepByID(ctx context.Context, id string) (*entity.ProcessStep, error) {
+	var step entity.ProcessStep
+	err := r.db.WithContext(ctx).Preload("Materials").First(&step, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &step, nil
+}
+
+// UpdateStep 更新工序
+func (r *ProjectBOMRepository) UpdateStep(ctx context.Context, step *entity.ProcessStep) error {
+	return r.db.WithContext(ctx).Save(step).Error
+}
+
+// DeleteStep 删除工序
+func (r *ProjectBOMRepository) DeleteStep(ctx context.Context, id string) error {
+	r.db.WithContext(ctx).Delete(&entity.ProcessStepMaterial{}, "step_id = ?", id)
+	return r.db.WithContext(ctx).Delete(&entity.ProcessStep{}, "id = ?", id).Error
+}
+
+// ListStepsByRoute 获取工艺路线下的工序
+func (r *ProjectBOMRepository) ListStepsByRoute(ctx context.Context, routeID string) ([]entity.ProcessStep, error) {
+	var steps []entity.ProcessStep
+	err := r.db.WithContext(ctx).
+		Preload("Materials").
+		Where("route_id = ?", routeID).
+		Order("sort_order ASC").
+		Find(&steps).Error
+	return steps, err
+}
+
+// CreateStepMaterial 添加工序物料
+func (r *ProjectBOMRepository) CreateStepMaterial(ctx context.Context, m *entity.ProcessStepMaterial) error {
+	return r.db.WithContext(ctx).Create(m).Error
+}
+
+// DeleteStepMaterial 删除工序物料
+func (r *ProjectBOMRepository) DeleteStepMaterial(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Delete(&entity.ProcessStepMaterial{}, "id = ?", id).Error
 }

@@ -31,7 +31,7 @@ const mockTodoItems = [
   {
     id: '1',
     type: 'bom_review',
-    title: 'EVT 电子BOM v1.1 待审批',
+    title: 'EVT 工程BOM v1.1 待审批',
     project: 'nimo Air 2',
     priority: 'high',
     dueDate: '2026-02-08',

@@ -453,6 +453,42 @@ func main() {
 			UNIQUE(bom_item_id, variant_index)
 		)`,
 
+		// ECN redesign: 新增字段和表
+		"ALTER TABLE ecns ADD COLUMN IF NOT EXISTS technical_plan TEXT",
+		"ALTER TABLE ecns ADD COLUMN IF NOT EXISTS planned_date TIMESTAMP",
+		"ALTER TABLE ecns ADD COLUMN IF NOT EXISTS completion_rate INT DEFAULT 0",
+		"ALTER TABLE ecns ADD COLUMN IF NOT EXISTS approval_mode VARCHAR(16) DEFAULT 'serial'",
+		"ALTER TABLE ecns ADD COLUMN IF NOT EXISTS sop_impact JSONB",
+		"ALTER TABLE ecn_affected_items ADD COLUMN IF NOT EXISTS material_code VARCHAR(64)",
+		"ALTER TABLE ecn_affected_items ADD COLUMN IF NOT EXISTS material_name VARCHAR(256)",
+		"ALTER TABLE ecn_affected_items ADD COLUMN IF NOT EXISTS affected_bom_ids JSONB",
+		`CREATE TABLE IF NOT EXISTS ecn_tasks (
+			id VARCHAR(32) PRIMARY KEY,
+			ecn_id VARCHAR(32) NOT NULL,
+			type VARCHAR(32) NOT NULL,
+			title VARCHAR(256) NOT NULL,
+			description TEXT,
+			assignee_id VARCHAR(32),
+			due_date TIMESTAMP,
+			status VARCHAR(16) NOT NULL DEFAULT 'pending',
+			completed_at TIMESTAMP,
+			completed_by VARCHAR(32),
+			metadata JSONB,
+			sort_order INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_ecn_tasks_ecn_id ON ecn_tasks(ecn_id)",
+		`CREATE TABLE IF NOT EXISTS ecn_histories (
+			id VARCHAR(32) PRIMARY KEY,
+			ecn_id VARCHAR(32) NOT NULL,
+			action VARCHAR(32) NOT NULL,
+			user_id VARCHAR(32) NOT NULL,
+			detail JSONB,
+			created_at TIMESTAMP DEFAULT NOW()
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_ecn_histories_ecn_id ON ecn_histories(ecn_id)",
+
 		// EBOM专用字段 — GORM AutoMigrate may skip these on FK tables
 		"ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS item_type VARCHAR(20) DEFAULT 'component'",
 		"ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS designator VARCHAR(500)",
@@ -470,6 +506,130 @@ func main() {
 		// Update bom_type CHECK constraint to include PBOM and MBOM
 		"ALTER TABLE project_boms DROP CONSTRAINT IF EXISTS ck_bom_type",
 		"ALTER TABLE project_boms ADD CONSTRAINT ck_bom_type CHECK (bom_type IN ('EBOM','SBOM','PBOM','MBOM','OBOM','FWBOM'))",
+
+		// V18: 三级BOM重构 — 新增列
+		"ALTER TABLE project_boms ADD COLUMN IF NOT EXISTS source_bom_id VARCHAR(32)",
+		"ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS category VARCHAR(32) DEFAULT '结构件'",
+		"ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS sub_category VARCHAR(64)",
+		"ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS extended_attrs JSONB DEFAULT '{}'",
+		"ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS process_step_id VARCHAR(32)",
+		"ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS scrap_rate NUMERIC(5,2)",
+		"ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS effective_date DATE",
+		"ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS expire_date DATE",
+		"ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS is_alternative BOOLEAN DEFAULT false",
+		"ALTER TABLE project_bom_items ADD COLUMN IF NOT EXISTS alternative_for VARCHAR(32)",
+
+		// V18: 属性模板表
+		`CREATE TABLE IF NOT EXISTS category_attr_templates (
+			id VARCHAR(32) PRIMARY KEY,
+			category VARCHAR(32) NOT NULL,
+			sub_category VARCHAR(64) NOT NULL,
+			field_key VARCHAR(64) NOT NULL,
+			field_name VARCHAR(64) NOT NULL,
+			field_type VARCHAR(16) NOT NULL DEFAULT 'text',
+			unit VARCHAR(16),
+			required BOOLEAN DEFAULT false,
+			options JSONB,
+			validation JSONB,
+			default_value VARCHAR(128),
+			sort_order INT DEFAULT 0,
+			show_in_table BOOLEAN DEFAULT true,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW(),
+			UNIQUE(category, sub_category, field_key)
+		)`,
+
+		// V18: 工艺路线表
+		`CREATE TABLE IF NOT EXISTS process_routes (
+			id VARCHAR(32) PRIMARY KEY,
+			project_id VARCHAR(32) NOT NULL,
+			bom_id VARCHAR(32),
+			name VARCHAR(128) NOT NULL,
+			description TEXT,
+			version VARCHAR(16) DEFAULT 'v1.0',
+			status VARCHAR(16) DEFAULT 'draft',
+			total_steps INT DEFAULT 0,
+			created_by VARCHAR(32),
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_process_routes_project ON process_routes(project_id)",
+		"CREATE INDEX IF NOT EXISTS idx_process_routes_bom ON process_routes(bom_id)",
+		"ALTER TABLE process_routes ADD COLUMN IF NOT EXISTS total_steps INT DEFAULT 0",
+
+		// V18: 工序表
+		`CREATE TABLE IF NOT EXISTS process_steps (
+			id VARCHAR(32) PRIMARY KEY,
+			route_id VARCHAR(32) NOT NULL REFERENCES process_routes(id) ON DELETE CASCADE,
+			step_number INT NOT NULL,
+			name VARCHAR(128) NOT NULL,
+			description TEXT,
+			equipment VARCHAR(128),
+			cycle_time_seconds INT,
+			setup_time_minutes INT,
+			quality_checks TEXT,
+			sort_order INT DEFAULT 0,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_process_steps_route ON process_steps(route_id)",
+
+		// V18: 工序物料表
+		`CREATE TABLE IF NOT EXISTS process_step_materials (
+			id VARCHAR(32) PRIMARY KEY,
+			step_id VARCHAR(32) NOT NULL REFERENCES process_steps(id) ON DELETE CASCADE,
+			material_id VARCHAR(32),
+			bom_item_id VARCHAR(32),
+			name VARCHAR(128) NOT NULL,
+			category VARCHAR(32) NOT NULL DEFAULT 'material',
+			quantity NUMERIC(15,4) DEFAULT 1,
+			unit VARCHAR(16) DEFAULT 'pcs',
+			notes TEXT,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_process_step_materials_step ON process_step_materials(step_id)",
+		"ALTER TABLE process_step_materials ADD COLUMN IF NOT EXISTS category VARCHAR(32) NOT NULL DEFAULT 'material'",
+
+		// V18: Migrate is_appearance_part and is_variant from fixed columns to extended_attrs JSONB
+		`UPDATE project_bom_items SET extended_attrs = COALESCE(extended_attrs, '{}'::jsonb) || jsonb_build_object('is_appearance_part', COALESCE(is_appearance_part, false)) WHERE is_appearance_part = true AND (extended_attrs IS NULL OR NOT (extended_attrs ? 'is_appearance_part'))`,
+		`UPDATE project_bom_items SET extended_attrs = COALESCE(extended_attrs, '{}'::jsonb) || jsonb_build_object('is_variant', COALESCE(is_variant, false)) WHERE is_variant = true AND (extended_attrs IS NULL OR NOT (extended_attrs ? 'is_variant'))`,
+
+		// V19: Migrate specification, reference, manufacturer, manufacturer_pn, supplier_pn, lead_time_days, drawing_no, is_critical to extended_attrs
+		`UPDATE project_bom_items SET extended_attrs = COALESCE(extended_attrs, '{}'::jsonb) || jsonb_build_object('specification', specification) WHERE specification IS NOT NULL AND specification != '' AND (extended_attrs IS NULL OR NOT (extended_attrs ? 'specification'))`,
+		`UPDATE project_bom_items SET extended_attrs = COALESCE(extended_attrs, '{}'::jsonb) || jsonb_build_object('reference', reference) WHERE reference IS NOT NULL AND reference != '' AND (extended_attrs IS NULL OR NOT (extended_attrs ? 'reference'))`,
+		`UPDATE project_bom_items SET extended_attrs = COALESCE(extended_attrs, '{}'::jsonb) || jsonb_build_object('manufacturer', manufacturer) WHERE manufacturer IS NOT NULL AND manufacturer != '' AND (extended_attrs IS NULL OR NOT (extended_attrs ? 'manufacturer'))`,
+		`UPDATE project_bom_items SET extended_attrs = COALESCE(extended_attrs, '{}'::jsonb) || jsonb_build_object('manufacturer_pn', manufacturer_pn) WHERE manufacturer_pn IS NOT NULL AND manufacturer_pn != '' AND (extended_attrs IS NULL OR NOT (extended_attrs ? 'manufacturer_pn'))`,
+		`UPDATE project_bom_items SET extended_attrs = COALESCE(extended_attrs, '{}'::jsonb) || jsonb_build_object('supplier_pn', supplier_pn) WHERE supplier_pn IS NOT NULL AND supplier_pn != '' AND (extended_attrs IS NULL OR NOT (extended_attrs ? 'supplier_pn'))`,
+		`UPDATE project_bom_items SET extended_attrs = COALESCE(extended_attrs, '{}'::jsonb) || jsonb_build_object('lead_time_days', lead_time_days) WHERE lead_time_days IS NOT NULL AND (extended_attrs IS NULL OR NOT (extended_attrs ? 'lead_time_days'))`,
+		`UPDATE project_bom_items SET extended_attrs = COALESCE(extended_attrs, '{}'::jsonb) || jsonb_build_object('drawing_no', drawing_no) WHERE drawing_no IS NOT NULL AND drawing_no != '' AND (extended_attrs IS NULL OR NOT (extended_attrs ? 'drawing_no'))`,
+		`UPDATE project_bom_items SET extended_attrs = COALESCE(extended_attrs, '{}'::jsonb) || jsonb_build_object('is_critical', true) WHERE is_critical = true AND (extended_attrs IS NULL OR NOT (extended_attrs ? 'is_critical'))`,
+
+		// V19: Clear old seed templates so new comprehensive seeds get applied
+		`DELETE FROM category_attr_templates`,
+
+		// V20: Add bom_type column to category_attr_templates for EBOM/PBOM grouping
+		"ALTER TABLE category_attr_templates ADD COLUMN IF NOT EXISTS bom_type VARCHAR(16) NOT NULL DEFAULT 'EBOM'",
+		// V20: Re-clear templates for updated seeds with bom_type + drawing fields
+		`DELETE FROM category_attr_templates`,
+
+		// V21: BOM版本控制字段
+		"ALTER TABLE project_boms ADD COLUMN IF NOT EXISTS version_major INT DEFAULT 0",
+		"ALTER TABLE project_boms ADD COLUMN IF NOT EXISTS version_minor INT DEFAULT 0",
+		"ALTER TABLE project_boms ADD COLUMN IF NOT EXISTS released_at TIMESTAMP",
+		"ALTER TABLE project_boms ADD COLUMN IF NOT EXISTS released_by VARCHAR(32)",
+		"ALTER TABLE project_boms ADD COLUMN IF NOT EXISTS source_version VARCHAR(20) DEFAULT ''",
+		"ALTER TABLE project_boms ADD COLUMN IF NOT EXISTS release_note TEXT DEFAULT ''",
+		// Backfill existing 'published' status to 'released'
+		"UPDATE project_boms SET status = 'released' WHERE status = 'published'",
+		// Backfill version_major/version_minor from existing version strings (e.g. 'v1.0')
+		`UPDATE project_boms SET version_major = 1, version_minor = 0 WHERE version = 'v1.0' AND version_major = 0`,
+
+		// V22: Merge structural sub-categories housing+internal → structural_part
+		`UPDATE project_bom_items SET sub_category = 'structural_part' WHERE sub_category IN ('housing', 'internal') AND category = 'structural'`,
+		`UPDATE category_attr_templates SET sub_category = 'structural_part' WHERE sub_category IN ('housing', 'internal') AND category = 'structural'`,
+		// Delete templates to re-seed with merged structural_part fields
+		`DELETE FROM category_attr_templates`,
 	}
 	for _, sql := range migrationSQL {
 		if err := db.Exec(sql).Error; err != nil {
@@ -573,9 +733,13 @@ func main() {
 	handlers.Routing = handler.NewRoutingHandler(routingSvc)
 	workflowSvc.SetRoutingService(routingSvc)
 	workflowSvc.SetTaskFormRepo(repos.TaskForm)
+	workflowSvc.SetBOMRepo(repos.ProjectBOM)
 
 	// Backfill: 为已有BOM items自动创建缺失的物料
 	services.ProjectBOM.BackfillMaterials(context.Background())
+
+	// Seed: BOM属性模板
+	services.ProjectBOM.SeedDefaultTemplates(context.Background())
 
 	// V13: CMF控件 (now initialized in NewHandlers via service)
 
@@ -690,8 +854,6 @@ func main() {
 		srmSamplingSvc.SetFeishuClient(feishuWorkflowClient)
 	}
 
-	// PLM→SRM集成：BOM创建后自动生成打样采购需求
-	services.Project.SetSRMProcurementService(srmProcurementSvc)
 	// 工作流→SRM集成：采购控件自动创建PR
 	workflowSvc.SetSRMProcurementService(srmProcurementSvc)
 
@@ -964,6 +1126,16 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 			// Phase 2: BOM导入模板下载
 			authorized.GET("/bom-template", h.ProjectBOM.DownloadTemplate)
 
+			// V18: 属性模板管理
+			bomTemplates := authorized.Group("/bom-attr-templates")
+			{
+				bomTemplates.GET("", h.ProjectBOM.ListTemplates)
+				bomTemplates.POST("", h.ProjectBOM.CreateTemplate)
+				bomTemplates.PUT("/:id", h.ProjectBOM.UpdateTemplate)
+				bomTemplates.DELETE("/:id", h.ProjectBOM.DeleteTemplate)
+				bomTemplates.POST("/seed", h.ProjectBOM.SeedTemplates)
+			}
+
 			// BOM解析预览（不保存）
 			authorized.POST("/bom/parse", h.ProjectBOM.ParseBOM)
 
@@ -1060,6 +1232,7 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				projects.POST("/:id/tasks/:taskId/reject", h.Project.RejectTask)
 
 				// V2: 项目BOM管理
+				projects.GET("/:id/bom-permissions", h.ProjectBOM.GetBOMPermissions)
 				projects.GET("/:id/boms", h.ProjectBOM.ListBOMs)
 				projects.POST("/:id/boms", h.ProjectBOM.CreateBOM)
 				projects.GET("/:id/boms/:bomId", h.ProjectBOM.GetBOM)
@@ -1076,8 +1249,24 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				// Phase 2: Excel导入导出
 				projects.GET("/:id/boms/:bomId/export", h.ProjectBOM.ExportBOM)
 				projects.POST("/:id/boms/:bomId/import", h.ProjectBOM.ImportBOM)
-				// Phase 3: EBOM→MBOM转换
+				// 版本发布
+				projects.POST("/:id/boms/:bomId/release", h.ProjectBOM.ReleaseBOM)
+				projects.POST("/:id/boms/create-from", h.ProjectBOM.CreateFromBOM)
+				// Phase 3: EBOM→MBOM/PBOM转换
 				projects.POST("/:id/boms/:bomId/convert-to-mbom", h.ProjectBOM.ConvertToMBOM)
+				projects.POST("/:id/boms/:bomId/convert-to-pbom", h.ProjectBOM.ConvertToPBOM)
+				// BOM分类树
+				projects.GET("/:id/boms/:bomId/category-tree", h.ProjectBOM.GetCategoryTree)
+				// 工艺路线
+				projects.GET("/:id/routes", h.ProjectBOM.ListRoutes)
+				projects.POST("/:id/boms/:bomId/routes", h.ProjectBOM.CreateRoute)
+				projects.GET("/:id/routes/:routeId", h.ProjectBOM.GetRoute)
+				projects.PUT("/:id/routes/:routeId", h.ProjectBOM.UpdateRoute)
+				projects.POST("/:id/routes/:routeId/steps", h.ProjectBOM.CreateStep)
+				projects.PUT("/:id/routes/:routeId/steps/:stepId", h.ProjectBOM.UpdateStep)
+				projects.DELETE("/:id/routes/:routeId/steps/:stepId", h.ProjectBOM.DeleteStep)
+				projects.POST("/:id/routes/:routeId/steps/:stepId/materials", h.ProjectBOM.CreateStepMaterial)
+				projects.DELETE("/:id/routes/:routeId/steps/:stepId/materials/:materialId", h.ProjectBOM.DeleteStepMaterial)
 
 				// V13: CMF编制
 				projects.GET("/:id/tasks/:taskId/cmf/appearance-parts", h.CMF.GetAppearanceParts)
@@ -1158,6 +1347,8 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 			{
 				ecns.GET("", h.ECN.List)
 				ecns.POST("", h.ECN.Create)
+				ecns.GET("/stats", h.ECN.GetStats)
+				ecns.GET("/my-pending", h.ECN.ListMyPending)
 				ecns.GET("/:id", h.ECN.Get)
 				ecns.PUT("/:id", h.ECN.Update)
 				ecns.POST("/:id/submit", h.ECN.Submit)
@@ -1166,9 +1357,15 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				ecns.POST("/:id/implement", h.ECN.Implement)
 				ecns.GET("/:id/affected-items", h.ECN.ListAffectedItems)
 				ecns.POST("/:id/affected-items", h.ECN.AddAffectedItem)
+				ecns.PUT("/:id/affected-items/:itemId", h.ECN.UpdateAffectedItem)
 				ecns.DELETE("/:id/affected-items/:itemId", h.ECN.RemoveAffectedItem)
 				ecns.GET("/:id/approvals", h.ECN.ListApprovals)
 				ecns.POST("/:id/approvers", h.ECN.AddApprover)
+				ecns.GET("/:id/tasks", h.ECN.ListTasks)
+				ecns.POST("/:id/tasks", h.ECN.CreateTask)
+				ecns.PUT("/:id/tasks/:taskId", h.ECN.UpdateTask)
+				ecns.POST("/:id/apply-bom-changes", h.ECN.ApplyBOMChanges)
+				ecns.GET("/:id/history", h.ECN.ListHistory)
 			}
 
 			// 文档管理

@@ -186,7 +186,6 @@ const (
 	TaskTypeTask            = "task"
 	TaskTypeMilestone       = "milestone"
 	TaskTypeDeliverable     = "deliverable"
-	TaskTypeSRMProcurement  = "srm_procurement"
 )
 
 // TaskPriority 任务优先级

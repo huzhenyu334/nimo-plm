@@ -4,16 +4,19 @@ import { ApiResponse } from '@/types';
 export interface TaskFormField {
   key: string;
   label: string;
-  type: 'text' | 'textarea' | 'number' | 'select' | 'multiselect' | 'date' | 'file' | 'checkbox' | 'user' | 'role_assignment' | 'bom_upload' | 'cmf' | 'tooling_list' | 'consumable_list' | 'procurement_control';
+  type: 'text' | 'textarea' | 'number' | 'select' | 'multiselect' | 'date' | 'file' | 'checkbox' | 'user' | 'role_assignment' | 'bom_upload' | 'ebom_control' | 'pbom_control' | 'mbom_control' | 'cmf' | 'tooling_list' | 'consumable_list' | 'procurement_control';
   required: boolean;
   placeholder?: string;
   description?: string;
   options?: string[];
   accept?: string;
   multiple?: boolean;
-  source_task_code?: string; // CMF字段：指定从哪个任务的SBOM提取外观件
+  source_task_code?: string; // CMF字段：指定从哪个任务的EBOM提取外观件
   source_field_keys?: string[]; // 采购控件：引用源任务的哪些字段key
-  bom_type?: 'EBOM' | 'SBOM' | 'PBOM'; // BOM上传字段：BOM类型
+  bom_categories?: string[]; // 采购控件：BOM大类筛选
+  bom_sub_categories?: string[]; // 采购控件：BOM子类筛选
+  bom_type?: 'EBOM' | 'PBOM' | 'MBOM'; // BOM上传字段：BOM类型（向后兼容）
+  config?: Record<string, any>; // BOM控件配置（ebom_control/pbom_control/mbom_control）
 }
 
 export interface TaskForm {

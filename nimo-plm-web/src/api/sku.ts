@@ -130,7 +130,7 @@ export const skuApi = {
     return res.data;
   },
 
-  // BOM Items (checkbox selection from SBOM)
+  // BOM Items (checkbox selection from PBOM)
   getBOMItems: async (projectId: string, skuId: string): Promise<SKUBOMItem[]> => {
     const res = await apiClient.get(`/projects/${projectId}/skus/${skuId}/bom-items`);
     return res.data.data?.items || [];
@@ -164,7 +164,7 @@ export const skuApi = {
     return res.data.data?.items || [];
   },
 
-  // Full BOM (merged: selected SBOM items + CMF)
+  // Full BOM (merged: selected PBOM items + CMF)
   getFullBOM: async (projectId: string, skuId: string): Promise<FullBOMItem[]> => {
     const res = await apiClient.get(`/projects/${projectId}/skus/${skuId}/full-bom`);
     return res.data.data?.items || [];
