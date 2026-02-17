@@ -126,6 +126,7 @@ export interface POItem {
   id: string;
   po_id: string;
   pr_item_id?: string;
+  bom_item_id?: string;
   material_id?: string;
   material_code: string;
   material_name: string;
@@ -517,6 +518,20 @@ export const srmApi = {
 
   approvePO: async (id: string): Promise<PurchaseOrder> => {
     const response = await apiClient.post<ApiResponse<PurchaseOrder>>(`/srm/purchase-orders/${id}/approve`);
+    return response.data.data;
+  },
+
+  submitPO: async (id: string): Promise<PurchaseOrder> => {
+    const response = await apiClient.post<ApiResponse<PurchaseOrder>>(`/srm/purchase-orders/${id}/submit`);
+    return response.data.data;
+  },
+
+  deletePO: async (id: string): Promise<void> => {
+    await apiClient.delete(`/srm/purchase-orders/${id}`);
+  },
+
+  generatePOsFromBOM: async (data: { bom_id: string; item_ids: string[] }): Promise<PurchaseOrder[]> => {
+    const response = await apiClient.post<ApiResponse<PurchaseOrder[]>>('/srm/purchase-orders/from-bom', data);
     return response.data.data;
   },
 

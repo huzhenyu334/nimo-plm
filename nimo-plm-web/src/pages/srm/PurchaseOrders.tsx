@@ -29,13 +29,13 @@ const typeLabels: Record<string, string> = { sample: '打样', production: '量�
 const typeColors: Record<string, string> = { sample: 'blue', production: 'green' };
 
 const statusLabels: Record<string, string> = {
-  draft: '草稿', pending: '待审批', approved: '已批准', rejected: '已拒绝',
-  in_progress: '进行中', shipped: '已发货', received: '已收货',
+  draft: '草稿', submitted: '待审批', pending: '待审批', approved: '已批准', rejected: '已拒绝',
+  in_progress: '进行中', sent: '已发送', shipped: '已发货', partial: '部分收货', received: '已收货',
   completed: '已完成', cancelled: '已取消',
 };
 const statusColors: Record<string, string> = {
-  draft: 'default', pending: 'processing', approved: 'success', rejected: 'error',
-  in_progress: 'processing', shipped: 'cyan', received: 'blue',
+  draft: 'default', submitted: 'processing', pending: 'processing', approved: 'success', rejected: 'error',
+  in_progress: 'processing', sent: 'blue', shipped: 'cyan', partial: 'orange', received: 'blue',
   completed: 'success', cancelled: 'default',
 };
 
@@ -102,6 +102,27 @@ const PurchaseOrders: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['srm-pos'] });
     },
     onError: () => message.error('收货失败'),
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: (id: string) => srmApi.submitPO(id),
+    onSuccess: () => {
+      message.success('订单已提交审批');
+      queryClient.invalidateQueries({ queryKey: ['srm-pos'] });
+      queryClient.invalidateQueries({ queryKey: ['srm-po', currentPO?.id] });
+    },
+    onError: () => message.error('提交失败'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => srmApi.deletePO(id),
+    onSuccess: () => {
+      message.success('订单已删除');
+      setDrawerVisible(false);
+      setCurrentPO(null);
+      queryClient.invalidateQueries({ queryKey: ['srm-pos'] });
+    },
+    onError: () => message.error('删除失败'),
   });
 
   const columns = [
@@ -303,6 +324,27 @@ const PurchaseOrders: React.FC = () => {
       >
         {detail && (
           <>
+            {detail.status === 'draft' && (
+              <Space style={{ marginBottom: 16 }}>
+                <Popconfirm title="确认提交审批？" onConfirm={() => submitMutation.mutate(detail.id)}>
+                  <Button type="primary" loading={submitMutation.isPending}>提交审批</Button>
+                </Popconfirm>
+                <Popconfirm title="确认删除此订单？" onConfirm={() => deleteMutation.mutate(detail.id)}>
+                  <Button danger loading={deleteMutation.isPending}>删除</Button>
+                </Popconfirm>
+              </Space>
+            )}
+            {detail.status === 'submitted' && (
+              <Space style={{ marginBottom: 16 }}>
+                <Button type="primary" onClick={() => srmApi.approvePO(detail.id).then(() => {
+                  message.success('审批通过');
+                  queryClient.invalidateQueries({ queryKey: ['srm-pos'] });
+                  queryClient.invalidateQueries({ queryKey: ['srm-po', detail.id] });
+                }).catch(() => message.error('审批失败'))}>
+                  审批通过
+                </Button>
+              </Space>
+            )}
             <Descriptions column={isMobile ? 1 : 2} bordered size="small" style={{ marginBottom: 24 }}>
               <Descriptions.Item label="PO编码">{detail.po_code}</Descriptions.Item>
               <Descriptions.Item label="供应商">{detail.supplier?.name || '-'}</Descriptions.Item>

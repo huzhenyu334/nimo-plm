@@ -874,6 +874,244 @@ func (s *ProcurementService) ApprovePO(ctx context.Context, id, userID string) (
 	return po, nil
 }
 
+// SubmitPO 提交PO审批
+func (s *ProcurementService) SubmitPO(ctx context.Context, id string) (*entity.PurchaseOrder, error) {
+	po, err := s.poRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if po.Status != entity.POStatusDraft {
+		return nil, fmt.Errorf("只有草稿状态的订单可以提交")
+	}
+	po.Status = entity.POStatusSubmitted
+	if err := s.poRepo.Update(ctx, po); err != nil {
+		return nil, err
+	}
+	return po, nil
+}
+
+// DeletePO 删除PO（仅draft状态）
+func (s *ProcurementService) DeletePO(ctx context.Context, id string) error {
+	po, err := s.poRepo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if po.Status != entity.POStatusDraft {
+		return fmt.Errorf("只有草稿状态的订单可以删除")
+	}
+	return s.poRepo.Delete(ctx, id)
+}
+
+// GenerateFromBOMRequest 从BOM生成PO请求
+type GenerateFromBOMRequest struct {
+	BOMID   string   `json:"bom_id" binding:"required"`
+	ItemIDs []string `json:"item_ids" binding:"required"`
+}
+
+// GeneratePOsFromBOM 从BOM生成采购订单（按供应商分组）
+func (s *ProcurementService) GeneratePOsFromBOM(ctx context.Context, userID string, req *GenerateFromBOMRequest) ([]*entity.PurchaseOrder, error) {
+	// Fetch specified BOM items
+	var bomItems []struct {
+		ID             string   `gorm:"column:id"`
+		Name           string   `gorm:"column:name"`
+		MPN            string   `gorm:"column:mpn"`
+		Quantity       float64  `gorm:"column:quantity"`
+		Unit           string   `gorm:"column:unit"`
+		UnitPrice      *float64 `gorm:"column:unit_price"`
+		SupplierID     *string  `gorm:"column:supplier_id"`
+		Supplier       string   `gorm:"column:supplier"`
+		Category       string   `gorm:"column:category"`
+		SubCategory    string   `gorm:"column:sub_category"`
+	}
+	if err := s.db.Table("project_bom_items").
+		Where("bom_id = ? AND id IN ?", req.BOMID, req.ItemIDs).
+		Find(&bomItems).Error; err != nil {
+		return nil, fmt.Errorf("获取BOM行项失败: %w", err)
+	}
+	if len(bomItems) == 0 {
+		return nil, fmt.Errorf("未找到指定的BOM行项")
+	}
+
+	// Group by supplier_id
+	type supplierGroup struct {
+		supplierID string
+		items      []struct {
+			ID             string
+			Name           string
+			MPN            string
+			Quantity       float64
+			Unit           string
+			UnitPrice      *float64
+			Category       string
+			SubCategory    string
+		}
+	}
+	groups := map[string]*supplierGroup{}
+	var noSupplierItems []struct {
+		ID             string
+		Name           string
+		MPN            string
+		Quantity       float64
+		Unit           string
+		UnitPrice      *float64
+		Category       string
+		SubCategory    string
+	}
+
+	for _, item := range bomItems {
+		sid := ""
+		if item.SupplierID != nil && *item.SupplierID != "" {
+			sid = *item.SupplierID
+		}
+		entry := struct {
+			ID             string
+			Name           string
+			MPN            string
+			Quantity       float64
+			Unit           string
+			UnitPrice      *float64
+			Category       string
+			SubCategory    string
+		}{item.ID, item.Name, item.MPN, item.Quantity, item.Unit, item.UnitPrice, item.Category, item.SubCategory}
+
+		if sid == "" {
+			noSupplierItems = append(noSupplierItems, entry)
+		} else {
+			if groups[sid] == nil {
+				groups[sid] = &supplierGroup{supplierID: sid}
+			}
+			groups[sid].items = append(groups[sid].items, entry)
+		}
+	}
+
+	// Create POs per supplier
+	var result []*entity.PurchaseOrder
+	createPO := func(supplierID string, items []struct {
+		ID             string
+		Name           string
+		MPN            string
+		Quantity       float64
+		Unit           string
+		UnitPrice      *float64
+		Category       string
+		SubCategory    string
+	}) error {
+		code, err := s.poRepo.GenerateCode(ctx)
+		if err != nil {
+			return err
+		}
+		poID := uuid.New().String()[:32]
+		var totalAmount float64
+		var poItems []entity.POItem
+		for i, item := range items {
+			itemAmount := 0.0
+			if item.UnitPrice != nil {
+				itemAmount = item.Quantity * *item.UnitPrice
+			}
+			totalAmount += itemAmount
+			bomID := item.ID
+			var amt *float64
+			if itemAmount > 0 {
+				amt = &itemAmount
+			}
+			poItems = append(poItems, entity.POItem{
+				ID:           uuid.New().String()[:32],
+				POID:         poID,
+				BOMItemID:    &bomID,
+				MaterialName: item.Name,
+				Specification: item.MPN,
+				Quantity:     item.Quantity,
+				Unit:         item.Unit,
+				UnitPrice:    item.UnitPrice,
+				TotalAmount:  amt,
+				SortOrder:    i + 1,
+			})
+		}
+		po := &entity.PurchaseOrder{
+			ID:          poID,
+			POCode:      code,
+			SupplierID:  supplierID,
+			Type:        "production",
+			Status:      entity.POStatusDraft,
+			TotalAmount: &totalAmount,
+			Currency:    "CNY",
+			CreatedBy:   userID,
+			Items:       poItems,
+		}
+		if err := s.poRepo.Create(ctx, po); err != nil {
+			return err
+		}
+		// Re-read to get supplier info
+		created, _ := s.poRepo.FindByID(ctx, poID)
+		if created != nil {
+			result = append(result, created)
+		} else {
+			result = append(result, po)
+		}
+		return nil
+	}
+
+	for sid, group := range groups {
+		if err := createPO(sid, group.items); err != nil {
+			return nil, fmt.Errorf("生成采购订单失败: %w", err)
+		}
+	}
+
+	// Items without supplier go into a single "unassigned" PO if any
+	if len(noSupplierItems) > 0 {
+		// Create PO with empty supplier_id — user will assign later
+		code, err := s.poRepo.GenerateCode(ctx)
+		if err != nil {
+			return nil, err
+		}
+		poID := uuid.New().String()[:32]
+		var totalAmount float64
+		var poItems []entity.POItem
+		for i, item := range noSupplierItems {
+			itemAmount := 0.0
+			if item.UnitPrice != nil {
+				itemAmount = item.Quantity * *item.UnitPrice
+			}
+			totalAmount += itemAmount
+			bomID := item.ID
+			var amt *float64
+			if itemAmount > 0 {
+				amt = &itemAmount
+			}
+			poItems = append(poItems, entity.POItem{
+				ID:           uuid.New().String()[:32],
+				POID:         poID,
+				BOMItemID:    &bomID,
+				MaterialName: item.Name,
+				Specification: item.MPN,
+				Quantity:     item.Quantity,
+				Unit:         item.Unit,
+				UnitPrice:    item.UnitPrice,
+				TotalAmount:  amt,
+				SortOrder:    i + 1,
+			})
+		}
+		po := &entity.PurchaseOrder{
+			ID:          poID,
+			POCode:      code,
+			SupplierID:  "unassigned",
+			Type:        "production",
+			Status:      entity.POStatusDraft,
+			TotalAmount: &totalAmount,
+			Currency:    "CNY",
+			CreatedBy:   userID,
+			Notes:       "从BOM生成，部分物料未指定供应商",
+			Items:       poItems,
+		}
+		if err := s.poRepo.Create(ctx, po); err != nil {
+			return nil, fmt.Errorf("生成未指定供应商订单失败: %w", err)
+		}
+		result = append(result, po)
+	}
+
+	return result, nil
+}
+
 // ReceiveItemRequest 收货请求
 type ReceiveItemRequest struct {
 	ReceivedQty float64 `json:"received_qty" binding:"required"`

@@ -840,7 +840,16 @@ func main() {
 			zapLogger.Warn("V15 migration warning", zap.String("sql", sql), zap.Error(err))
 		}
 	}
-	zapLogger.Info("SRM database migration completed (including V15)")
+	// V16: POItem增加BOM行项关联字段
+	v16SQL := []string{
+		"ALTER TABLE srm_po_items ADD COLUMN IF NOT EXISTS bom_item_id VARCHAR(32)",
+	}
+	for _, sql := range v16SQL {
+		if err := db.Exec(sql).Error; err != nil {
+			zapLogger.Warn("V16 migration warning", zap.String("sql", sql), zap.Error(err))
+		}
+	}
+	zapLogger.Info("SRM database migration completed (including V16)")
 
 	// SRM仓库和服务
 	srmRepos := srmrepo.NewRepositories(db)
@@ -1480,10 +1489,13 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 					pos.GET("", srmH.PO.ListPOs)
 					pos.GET("/export", srmH.PO.ExportPOs)
 					pos.POST("", srmH.PO.CreatePO)
+					pos.POST("/from-bom", srmH.PO.GenerateFromBOM)
 					pos.GET("/:id", srmH.PO.GetPO)
 					pos.PUT("/:id", srmH.PO.UpdatePO)
+					pos.POST("/:id/submit", srmH.PO.SubmitPO)
 					pos.POST("/:id/approve", srmH.PO.ApprovePO)
 					pos.POST("/:id/items/:itemId/receive", srmH.PO.ReceiveItem)
+					pos.DELETE("/:id", srmH.PO.DeletePO)
 				}
 
 				// 来料检验

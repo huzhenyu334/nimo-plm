@@ -8,6 +8,7 @@ import {
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { projectApi } from '@/api/projects';
 import { projectBomApi } from '@/api/projectBom';
+import { srmApi } from '@/api/srm';
 import { EBOMControl, PBOMControl, MBOMControl, type BOMControlConfig } from '@/components/BOM';
 import BOMItemMobileForm from '@/components/BOM/BOMItemMobileForm';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -229,6 +230,14 @@ const BOMManagementDetail: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['project-boms', projectId] });
     },
     onError: () => message.error('提交失败'),
+  });
+
+  const generatePOMutation = useMutation({
+    mutationFn: (data: { bom_id: string; item_ids: string[] }) => srmApi.generatePOsFromBOM(data),
+    onSuccess: (pos) => {
+      message.success(`已生成 ${pos.length} 个采购订单`);
+    },
+    onError: () => message.error('生成采购订单失败'),
   });
 
   // ========== onChange-driven local state ==========
@@ -566,6 +575,25 @@ const BOMManagementDetail: React.FC = () => {
             <Text type="secondary" style={{ fontSize: 12 }}>共 {localItems.length} 项物料</Text>
             {unpriced > 0 && (
               <Text type="warning" style={{ fontSize: 12 }}>{unpriced}项未定价</Text>
+            )}
+            {selectedBomId && localItems.length > 0 && (
+              <Button
+                size="small"
+                type="primary"
+                style={{ marginLeft: 'auto' }}
+                loading={generatePOMutation.isPending}
+                onClick={() => {
+                  const itemIds = localItems.map(item => item.id).filter(Boolean);
+                  if (itemIds.length === 0) { message.warning('没有可用物料'); return; }
+                  Modal.confirm({
+                    title: '生成采购订单',
+                    content: `将从当前 ${itemIds.length} 项BOM物料生成采购订单，按供应商自动分组。确认继续？`,
+                    onOk: () => generatePOMutation.mutate({ bom_id: selectedBomId, item_ids: itemIds }),
+                  });
+                }}
+              >
+                生成采购订单
+              </Button>
             )}
           </div>
         );

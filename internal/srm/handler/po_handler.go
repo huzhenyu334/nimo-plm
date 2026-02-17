@@ -222,6 +222,46 @@ func (h *POHandler) ExportPOs(c *gin.Context) {
 	}
 }
 
+// SubmitPO 提交采购订单审批
+// POST /api/v1/srm/purchase-orders/:id/submit
+func (h *POHandler) SubmitPO(c *gin.Context) {
+	id := c.Param("id")
+	po, err := h.svc.SubmitPO(c.Request.Context(), id)
+	if err != nil {
+		BadRequest(c, "提交失败: "+err.Error())
+		return
+	}
+	Success(c, po)
+}
+
+// DeletePO 删除采购订单
+// DELETE /api/v1/srm/purchase-orders/:id
+func (h *POHandler) DeletePO(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.svc.DeletePO(c.Request.Context(), id); err != nil {
+		BadRequest(c, "删除失败: "+err.Error())
+		return
+	}
+	Success(c, nil)
+}
+
+// GenerateFromBOM 从BOM生成采购订单
+// POST /api/v1/srm/purchase-orders/from-bom
+func (h *POHandler) GenerateFromBOM(c *gin.Context) {
+	var req service.GenerateFromBOMRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	userID := GetUserID(c)
+	pos, err := h.svc.GeneratePOsFromBOM(c.Request.Context(), userID, &req)
+	if err != nil {
+		InternalError(c, "从BOM生成采购订单失败: "+err.Error())
+		return
+	}
+	Created(c, pos)
+}
+
 // ReceiveItem PO行项收货
 // POST /api/v1/srm/purchase-orders/:id/items/:itemId/receive
 func (h *POHandler) ReceiveItem(c *gin.Context) {

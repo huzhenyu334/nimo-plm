@@ -47,6 +47,7 @@ func (PurchaseOrder) TableName() string {
 // PO状态
 const (
 	POStatusDraft     = "draft"
+	POStatusSubmitted = "submitted"
 	POStatusApproved  = "approved"
 	POStatusSent      = "sent"
 	POStatusPartial   = "partial"
@@ -60,6 +61,7 @@ type POItem struct {
 	ID            string   `json:"id" gorm:"primaryKey;size:32"`
 	POID          string   `json:"po_id" gorm:"size:32;not null;index"`
 	PRItemID      *string  `json:"pr_item_id" gorm:"size:32"`
+	BOMItemID     *string  `json:"bom_item_id" gorm:"size:32"`   // 关联BOM行项来源
 	MaterialID    *string  `json:"material_id" gorm:"size:32"`
 	MaterialCode  string   `json:"material_code" gorm:"size:50"`
 	MaterialName  string   `json:"material_name" gorm:"size:200;not null"`

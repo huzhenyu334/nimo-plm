@@ -84,6 +84,16 @@ func (r *PORepository) Update(ctx context.Context, po *entity.PurchaseOrder) err
 	return r.db.WithContext(ctx).Save(po).Error
 }
 
+// Delete 删除采购订单及行项
+func (r *PORepository) Delete(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("po_id = ?", id).Delete(&entity.POItem{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", id).Delete(&entity.PurchaseOrder{}).Error
+	})
+}
+
 // ReceiveItem 收货（更新行项收货数量和状态）
 func (r *PORepository) ReceiveItem(ctx context.Context, itemID string, receivedQty float64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
