@@ -532,8 +532,7 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
   });
 
   // Sync server data → local state (skip during save to avoid overwriting local edits)
-  const partsVersionRef = useRef(0);
-  const [partsVersion, setPartsVersion] = useState(0);
+  // Sync server data → local state (same pattern as BOM)
   useEffect(() => {
     if (syncingRef.current) return;
     if (!parts.length) {
@@ -542,12 +541,10 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
       return;
     }
     const allVariants: Record<string, any>[] = parts.flatMap(p =>
-      (p.cmf_variants || []).map(v => ({ ...v }))
+      (p.cmf_variants || []).map(v => ({ ...v, bom_item_id: p.bom_item.id }))
     );
     serverVariantsRef.current = allVariants;
     setLocalVariants(allVariants);
-    partsVersionRef.current += 1;
-    setPartsVersion(partsVersionRef.current);
   }, [parts]);
 
   // Get variants for a specific bom_item
@@ -641,20 +638,14 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
 
         // Update refs — replace temp ids with server data
         const updated = local.map(v => {
-          if (idMapping[v.id]) return { ...idMapping[v.id] };
+          if (idMapping[v.id]) return { ...idMapping[v.id], bom_item_id: v.bom_item_id };
           return v;
         });
         serverVariantsRef.current = updated;
         setLocalVariants(updated);
 
-        // Update query cache so next mount gets fresh data instantly
-        queryClient.setQueryData(['appearance-parts', projectId], (old: any) => {
-          if (!old) return old;
-          return old.map((part: any) => ({
-            ...part,
-            cmf_variants: updated.filter((v: any) => v.bom_item_id === part.bom_item_id),
-          }));
-        });
+        // Refresh server cache in background (won't overwrite local because syncingRef is still true)
+        await queryClient.invalidateQueries({ queryKey: ['appearance-parts', projectId] });
 
       } catch {
         message.error('保存失败');
@@ -669,7 +660,7 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
     };
   }, [localVariants, projectId, readonly, queryClient, message]);
 
-  if (isLoading || (partsVersion === 0 && parts.length > 0)) {
+  if (isLoading) {
     return <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="加载CMF数据..." /></div>;
   }
 
