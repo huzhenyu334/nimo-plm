@@ -26,7 +26,7 @@ import {
 } from '@ant-design/icons';
 import { taskFormApi } from '@/api/taskForms';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { cmfVariantApi, type CMFVariant, type AppearancePartWithCMF } from '@/api/cmfVariant';
+import { cmfVariantApi, type AppearancePartWithCMF } from '@/api/cmfVariant';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import EditableTable, { type EditableColumn } from './EditableTable';
 
@@ -68,7 +68,7 @@ const parseDrawings = (v: any): DrawingFile[] => {
 
 interface CMFEditControlProps {
   projectId: string;
-  taskId: string;
+  taskId?: string;
   readonly?: boolean;
 }
 

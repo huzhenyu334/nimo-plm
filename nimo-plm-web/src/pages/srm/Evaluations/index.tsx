@@ -16,10 +16,8 @@ import {
   Progress,
   message,
   InputNumber,
-  Spin,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, SearchOutlined, RightOutlined } from '@ant-design/icons';
-import { useIsMobile } from '@/hooks/useIsMobile';
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { srmApi, SupplierEvaluation } from '@/api/srm';
 import dayjs from 'dayjs';
@@ -51,7 +49,6 @@ const scoreToStars = (score?: number) => {
 };
 
 export default function Evaluations() {
-  const isMobile = useIsMobile();
   const queryClient = useQueryClient();
   const [filterSupplier, setFilterSupplier] = useState<string>();
   const [filterStatus, setFilterStatus] = useState<string>();

@@ -49,7 +49,7 @@ const BOMManagementDetail: React.FC = () => {
   const [ecnModalOpen, setEcnModalOpen] = useState(false);
   const [ecnTitle, setEcnTitle] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
-  const [draftData, setDraftData] = useState<any>(null);
+  const [_draftData, setDraftData] = useState<any>(null);
 
   // Mobile form state
   const [editingItem, setEditingItem] = useState<Record<string, any> | null>(null);

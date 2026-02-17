@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Card,
@@ -9,6 +8,7 @@ import {
   Space,
   Select,
   Modal,
+  Input,
   message,
   Typography,
   Descriptions,
@@ -28,7 +28,6 @@ const STATUS_CONFIG: Record<string, { color: string; text: string }> = {
 };
 
 const ECNManagement: React.FC = () => {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [detailModalOpen, setDetailModalOpen] = useState(false);

@@ -521,6 +521,12 @@ export const projectBomApi = {
     );
     return response.data.data;
   },
+
+  // 跨项目搜索BOM行项
+  searchItems: async (params: { q: string; category?: string; limit?: number }): Promise<any[]> => {
+    const response = await apiClient.get<ApiResponse<any[]>>('/bom-items/search', { params });
+    return response.data.data || [];
+  },
 };
 
 export interface BOMPermissions {

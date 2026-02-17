@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button, Typography, Tag, Empty, Space, Spin } from 'antd';
 import {
@@ -11,6 +11,7 @@ import { projectBomApi } from '@/api/projectBom';
 import type { CategoryAttrTemplate } from '@/api/projectBom';
 import DynamicBOMTable from './DynamicBOMTable';
 import BOMCategoryView from './BOMCategoryView';
+import AddMaterialModal from './AddMaterialModal';
 import {
   CATEGORY_LABELS,
   SUB_CATEGORY_LABELS,
@@ -138,7 +139,34 @@ const PBOMControl: React.FC<PBOMControlProps> = ({
     onChange([...otherItems, ...newItems]);
   }, [value, onChange]);
 
-  // Add a new row for a sub_category
+  // Modal state for "先搜后建" add material flow
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addModalTarget, setAddModalTarget] = useState<{ category: string; subCategory: string }>({ category: '', subCategory: '' });
+
+  // Open modal for adding material
+  const handleOpenAddModal = useCallback((category: string, subCategory: string) => {
+    setAddModalTarget({ category, subCategory });
+    setAddModalOpen(true);
+  }, []);
+
+  // Add item helper (used by modal callbacks)
+  const addNewItem = useCallback((itemData: Record<string, any>) => {
+    const maxNum = value.reduce((m, i) => Math.max(m, i.item_number || 0), 0);
+    const newItem: Record<string, any> = {
+      id: 'new-' + Date.now(),
+      item_number: maxNum + 1,
+      category: addModalTarget.category,
+      sub_category: addModalTarget.subCategory,
+      quantity: 1,
+      unit: 'pcs',
+      extended_attrs: {},
+      ...itemData,
+    };
+    onChange([...value, newItem]);
+    setAddModalOpen(false);
+  }, [value, onChange, addModalTarget]);
+
+  // Legacy direct add (skip modal — for mobile or fallback)
   const handleAddRow = useCallback((category: string, subCategory: string) => {
     const maxNum = value.reduce((m, i) => Math.max(m, i.item_number || 0), 0);
     const newItem: Record<string, any> = {
@@ -201,16 +229,16 @@ const PBOMControl: React.FC<PBOMControlProps> = ({
           category={category}
         />
 
-        {/* Add row button */}
+        {/* Add material button */}
         {catEditable && (
           <div style={{ padding: '4px 12px' }}>
             <Button
               type="dashed"
               size="small"
               icon={<PlusOutlined />}
-              onClick={() => handleAddRow(category, subCategory)}
+              onClick={() => handleOpenAddModal(category, subCategory)}
             >
-              添加行
+              添加物料
             </Button>
           </div>
         )}
@@ -303,6 +331,19 @@ const PBOMControl: React.FC<PBOMControlProps> = ({
           </Space>
         </div>
       )}
+      {/* 添加物料弹窗 */}
+      <AddMaterialModal
+        open={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onSelect={addNewItem}
+        onCreate={addNewItem}
+        onSkip={() => {
+          handleAddRow(addModalTarget.category, addModalTarget.subCategory);
+          setAddModalOpen(false);
+        }}
+        category={addModalTarget.category}
+        subCategory={addModalTarget.subCategory}
+      />
     </div>
   );
 };

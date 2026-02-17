@@ -16,10 +16,8 @@ import {
   Popconfirm,
   message,
   InputNumber,
-  Spin,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, ThunderboltOutlined, SearchOutlined, RightOutlined } from '@ant-design/icons';
-import { useIsMobile } from '@/hooks/useIsMobile';
+import { PlusOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { srmApi, Settlement, SettlementDispute } from '@/api/srm';
 import dayjs from 'dayjs';
@@ -49,9 +47,7 @@ const disputeTypeOptions = [
 ];
 
 export default function Settlements() {
-  const isMobile = useIsMobile();
   const queryClient = useQueryClient();
-  const [searchText, setSearchText] = useState('');
   const [filterSupplier, setFilterSupplier] = useState<string>();
   const [filterStatus, setFilterStatus] = useState<string>();
   const [page, setPage] = useState(1);

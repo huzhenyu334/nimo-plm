@@ -45,15 +45,15 @@ test.describe('BOM Management', () => {
     }
   });
 
-  test('bom detail has add row button', async ({ page }) => {
+  test('bom detail has add material button', async ({ page }) => {
     await page.goto('/bom-management');
     await page.waitForTimeout(1500);
     const projectItems = page.locator('[style*="cursor: pointer"]');
     if (await projectItems.count() > 0) {
       await projectItems.first().click();
       await page.waitForTimeout(1500);
-      // BOM detail page shows "添加行" buttons for adding items to categories
-      const addRowBtn = page.locator('button').filter({ hasText: '添加行' });
+      // BOM detail page shows "添加物料" buttons for adding items to categories
+      const addRowBtn = page.locator('button').filter({ hasText: '添加物料' });
       await expect(addRowBtn.first()).toBeVisible();
     }
   });
@@ -88,6 +88,83 @@ test.describe('BOM Management', () => {
       const errorAlert = page.locator('.ant-alert-error');
       await expect(errorAlert).toHaveCount(0);
     }
+  });
+});
+
+test.describe('BOM Management - Add Material Modal', () => {
+  test('add material button opens search modal', async ({ page }) => {
+    await page.goto('/bom-management');
+    await page.waitForTimeout(1500);
+    const projectItems = page.locator('[style*="cursor: pointer"]');
+    if (await projectItems.count() > 0) {
+      await projectItems.first().click();
+      await page.waitForTimeout(1500);
+      // Click first "添加物料" button
+      const addBtn = page.locator('button').filter({ hasText: '添加物料' });
+      if (await addBtn.count() > 0) {
+        await addBtn.first().click();
+        await page.waitForTimeout(500);
+        // Modal should appear with search input
+        const modal = page.locator('.ant-modal');
+        await expect(modal).toBeVisible();
+        const searchInput = modal.locator('input[placeholder*="搜索"]');
+        await expect(searchInput).toBeVisible();
+      }
+    }
+  });
+
+  test('add material modal has create new button', async ({ page }) => {
+    await page.goto('/bom-management');
+    await page.waitForTimeout(1500);
+    const projectItems = page.locator('[style*="cursor: pointer"]');
+    if (await projectItems.count() > 0) {
+      await projectItems.first().click();
+      await page.waitForTimeout(1500);
+      const addBtn = page.locator('button').filter({ hasText: '添加物料' });
+      if (await addBtn.count() > 0) {
+        await addBtn.first().click();
+        await page.waitForTimeout(500);
+        const modal = page.locator('.ant-modal');
+        // Should have "创建新物料" button
+        const createBtn = modal.locator('button').filter({ hasText: '创建新物料' });
+        await expect(createBtn).toBeVisible();
+      }
+    }
+  });
+
+  test('add material modal has skip link', async ({ page }) => {
+    await page.goto('/bom-management');
+    await page.waitForTimeout(1500);
+    const projectItems = page.locator('[style*="cursor: pointer"]');
+    if (await projectItems.count() > 0) {
+      await projectItems.first().click();
+      await page.waitForTimeout(1500);
+      const addBtn = page.locator('button').filter({ hasText: '添加物料' });
+      if (await addBtn.count() > 0) {
+        await addBtn.first().click();
+        await page.waitForTimeout(500);
+        const modal = page.locator('.ant-modal');
+        // Should have "跳过" skip link at bottom
+        const skipLink = modal.locator('button').filter({ hasText: '跳过' });
+        await expect(skipLink).toBeVisible();
+      }
+    }
+  });
+
+  test('bom item search API returns results', async ({ page }) => {
+    await page.goto('/bom-management');
+    await page.waitForTimeout(1000);
+    // Use the page context which has storageState auth to make API call
+    const result = await page.evaluate(async () => {
+      const token = localStorage.getItem('access_token');
+      const resp = await fetch('/api/v1/bom-items/search?q=&limit=5', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return { status: resp.status, body: await resp.json() };
+    });
+    expect(result.status).toBe(200);
+    expect(result.body).toHaveProperty('data');
+    expect(Array.isArray(result.body.data)).toBeTruthy();
   });
 });
 

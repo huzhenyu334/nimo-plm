@@ -178,6 +178,46 @@ func (r *ProjectBOMRepository) MatchMaterialByNameAndPN(ctx context.Context, nam
 	return &material, nil
 }
 
+// SearchItems 跨项目搜索BOM行项（按name/mpn/material_code模糊匹配）
+func (r *ProjectBOMRepository) SearchItems(ctx context.Context, keyword string, category string, limit int) ([]entity.ProjectBOMItem, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	var items []entity.ProjectBOMItem
+	query := r.db.WithContext(ctx).Model(&entity.ProjectBOMItem{})
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where(
+			"name ILIKE ? OR mpn ILIKE ? OR extended_attrs->>'manufacturer_pn' ILIKE ? OR extended_attrs->>'specification' ILIKE ?",
+			like, like, like, like,
+		)
+	}
+	if category != "" {
+		query = query.Where("category = ?", category)
+	}
+	err := query.Order("updated_at DESC").Limit(limit).Find(&items).Error
+	return items, err
+}
+
+// FindItemsByMPN 按MPN精确查找已有BOM行项（用于导入去重）
+func (r *ProjectBOMRepository) FindItemsByMPN(ctx context.Context, bomID string, mpns []string) (map[string]entity.ProjectBOMItem, error) {
+	if len(mpns) == 0 {
+		return map[string]entity.ProjectBOMItem{}, nil
+	}
+	var items []entity.ProjectBOMItem
+	err := r.db.WithContext(ctx).
+		Where("bom_id = ? AND mpn IN ?", bomID, mpns).
+		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]entity.ProjectBOMItem, len(items))
+	for _, item := range items {
+		result[item.MPN] = item
+	}
+	return result, err
+}
+
 // CreateRelease 创建BOM发布快照
 func (r *ProjectBOMRepository) CreateRelease(ctx context.Context, release *entity.BOMRelease) error {
 	return r.db.WithContext(ctx).Create(release).Error

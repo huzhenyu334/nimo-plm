@@ -408,6 +408,11 @@ func (s *ProjectBOMService) DeleteBOM(ctx context.Context, bomID string) error {
 	return nil
 }
 
+// SearchItems 跨项目搜索BOM行项
+func (s *ProjectBOMService) SearchItems(ctx context.Context, keyword, category string, limit int) ([]entity.ProjectBOMItem, error) {
+	return s.bomRepo.SearchItems(ctx, keyword, category, limit)
+}
+
 // DeleteItem 删除BOM行项
 func (s *ProjectBOMService) DeleteItem(ctx context.Context, bomID, itemID string) error {
 	bom, err := s.bomRepo.FindByID(ctx, bomID)
@@ -1057,7 +1062,19 @@ func (s *ProjectBOMService) ImportPADSBOM(ctx context.Context, bomID string, rea
 	existingCount, _ := s.bomRepo.CountItems(ctx, bomID)
 	itemNum := int(existingCount)
 
-	var entities []entity.ProjectBOMItem
+	// Phase 1: Parse all lines first to collect MPNs
+	type parsedLine struct {
+		qty            float64
+		reference      string
+		componentName  string
+		name           string
+		manufacturer   string
+		manufacturerPN string
+		notes          string
+		categoryID     string
+	}
+	var parsed []parsedLine
+
 	scanner := bufio.NewScanner(utf8Reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineNo := 0
@@ -1084,8 +1101,6 @@ func (s *ProjectBOMService) ImportPADSBOM(ctx context.Context, bomID string, rea
 		if len(fields) > 7 && strings.EqualFold(strings.TrimSpace(fields[7]), "NC") {
 			continue
 		}
-
-		itemNum++
 
 		qty := 1.0
 		if q, parseErr := strconv.ParseFloat(fields[1], 64); parseErr == nil {
@@ -1126,18 +1141,66 @@ func (s *ProjectBOMService) ImportPADSBOM(ctx context.Context, bomID string, rea
 
 		_, categoryID := inferCategoryFromReference(reference)
 
+		parsed = append(parsed, parsedLine{
+			qty: qty, reference: reference, componentName: componentName,
+			name: name, manufacturer: manufacturer, manufacturerPN: manufacturerPN,
+			notes: notes, categoryID: categoryID,
+		})
+	}
+
+	if scanErr := scanner.Err(); scanErr != nil {
+		return nil, fmt.Errorf("read rep file: %w", scanErr)
+	}
+
+	// Phase 2: Collect all MPNs and batch-check existing BOM items
+	var mpns []string
+	for _, p := range parsed {
+		if p.manufacturerPN != "" {
+			mpns = append(mpns, p.manufacturerPN)
+		}
+	}
+	existingByMPN, _ := s.bomRepo.FindItemsByMPN(ctx, bomID, mpns)
+
+	// Phase 3: Create items, skipping MPN duplicates
+	var entities []entity.ProjectBOMItem
+	for _, p := range parsed {
+		detail := ImportItemDetail{
+			Name:      p.name,
+			MPN:       p.manufacturerPN,
+			Reference: p.reference,
+		}
+
+		// Check MPN match status
+		if p.manufacturerPN == "" {
+			detail.Status = "missing"
+			result.MPNMissing++
+		} else if existing, ok := existingByMPN[p.manufacturerPN]; ok {
+			// MPN already exists in this BOM — skip, don't duplicate
+			detail.Status = "matched"
+			detail.MatchedItemID = existing.ID
+			result.MPNMatched++
+			result.Items = append(result.Items, detail)
+			continue // don't create a new item
+		} else {
+			detail.Status = "new"
+			result.MPNNew++
+		}
+		result.Items = append(result.Items, detail)
+
+		itemNum++
+
 		padsExtAttrs := entity.JSONB{}
-		if componentName != "" {
-			padsExtAttrs["specification"] = componentName
+		if p.componentName != "" {
+			padsExtAttrs["specification"] = p.componentName
 		}
-		if reference != "" {
-			padsExtAttrs["reference"] = reference
+		if p.reference != "" {
+			padsExtAttrs["reference"] = p.reference
 		}
-		if manufacturer != "" {
-			padsExtAttrs["manufacturer"] = manufacturer
+		if p.manufacturer != "" {
+			padsExtAttrs["manufacturer"] = p.manufacturer
 		}
-		if manufacturerPN != "" {
-			padsExtAttrs["manufacturer_pn"] = manufacturerPN
+		if p.manufacturerPN != "" {
+			padsExtAttrs["manufacturer_pn"] = p.manufacturerPN
 		}
 
 		item := entity.ProjectBOMItem{
@@ -1146,25 +1209,26 @@ func (s *ProjectBOMService) ImportPADSBOM(ctx context.Context, bomID string, rea
 			ItemNumber:    itemNum,
 			Category:      "electronic",
 			SubCategory:   "component",
-			Name:          name,
-			Quantity:      qty,
+			Name:          p.name,
+			Quantity:      p.qty,
 			Unit:          "pcs",
-			Notes:         notes,
+			MPN:           p.manufacturerPN,
+			Notes:         p.notes,
 			ExtendedAttrs: padsExtAttrs,
 			CreatedAt:     time.Now(),
 			UpdatedAt:     time.Now(),
 		}
 
-		mat, matchErr := s.bomRepo.MatchMaterialByNameAndPN(ctx, item.Name, manufacturerPN)
+		mat, matchErr := s.bomRepo.MatchMaterialByNameAndPN(ctx, item.Name, p.manufacturerPN)
 		if matchErr == nil && mat != nil {
 			item.MaterialID = &mat.ID
 			result.Matched++
 		} else {
-			cID := categoryID
+			cID := p.categoryID
 			if cID == "" {
 				cID = "mcat_el_oth"
 			}
-			newMat, createErr := s.autoCreateMaterial(ctx, item.Name, componentName, cID, manufacturer, manufacturerPN)
+			newMat, createErr := s.autoCreateMaterial(ctx, item.Name, p.componentName, cID, p.manufacturer, p.manufacturerPN)
 			if createErr != nil {
 				fmt.Printf("[WARN] auto-create material failed for %q: %v\n", item.Name, createErr)
 			} else if newMat != nil {
@@ -1175,10 +1239,6 @@ func (s *ProjectBOMService) ImportPADSBOM(ctx context.Context, bomID string, rea
 
 		entities = append(entities, item)
 		result.Success++
-	}
-
-	if scanErr := scanner.Err(); scanErr != nil {
-		return nil, fmt.Errorf("read rep file: %w", scanErr)
 	}
 
 	if len(entities) > 0 {
@@ -2625,10 +2685,23 @@ func findUploadedFileSize(fileID, fileName string) int64 {
 // ---- DTOs ----
 
 type ImportResult struct {
-	Success     int `json:"created"`
-	Failed      int `json:"errors"`
-	Matched     int `json:"matched"`
-	AutoCreated int `json:"auto_created"`
+	Success     int                `json:"created"`
+	Failed      int                `json:"errors"`
+	Matched     int                `json:"matched"`
+	AutoCreated int                `json:"auto_created"`
+	MPNMatched  int                `json:"mpn_matched"`  // MPN在已有BOM中匹配到
+	MPNNew      int                `json:"mpn_new"`      // MPN不为空但未匹配
+	MPNMissing  int                `json:"mpn_missing"`  // MPN为空
+	Items       []ImportItemDetail `json:"items,omitempty"`
+}
+
+// ImportItemDetail 导入明细（每条物料的匹配状态）
+type ImportItemDetail struct {
+	Name           string `json:"name"`
+	MPN            string `json:"mpn"`
+	Reference      string `json:"reference"`
+	Status         string `json:"status"` // matched / new / missing
+	MatchedItemID  string `json:"matched_item_id,omitempty"`
 }
 
 type BOMCompareResult struct {

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/bitfantasy/nimo/internal/plm/service"
@@ -249,6 +250,24 @@ func (h *BOMHandler) ReorderItems(c *gin.Context) {
 }
 
 // DeleteBOM DELETE /projects/:id/boms/:bomId
+// SearchItems GET /api/v1/bom-items/search?q=xxx&category=xxx&limit=20
+func (h *BOMHandler) SearchItems(c *gin.Context) {
+	keyword := c.Query("q")
+	category := c.Query("category")
+	limit := 20
+	if l := c.Query("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	items, err := h.svc.SearchItems(c.Request.Context(), keyword, category, limit)
+	if err != nil {
+		InternalError(c, "搜索物料失败: "+err.Error())
+		return
+	}
+	Success(c, items)
+}
+
 func (h *BOMHandler) DeleteBOM(c *gin.Context) {
 	bomID := c.Param("bomId")
 	if err := h.svc.DeleteBOM(c.Request.Context(), bomID); err != nil {

@@ -25,7 +25,6 @@ import {
   SendOutlined,
   DeleteOutlined,
   RollbackOutlined,
-  SearchOutlined,
   RightOutlined,
 } from '@ant-design/icons';
 import { templateApi, ProjectTemplate } from '@/api/templates';

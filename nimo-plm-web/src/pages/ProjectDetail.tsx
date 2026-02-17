@@ -69,7 +69,7 @@ import { skuApi, ProductSKU, FullBOMItem } from '@/api/sku';
 import { cmfVariantApi, type AppearancePartWithCMF, type CMFVariant } from '@/api/cmfVariant';
 import { partDrawingApi, PartDrawing } from '@/api/partDrawing';
 import UserSelect from '@/components/UserSelect';
-import CMFVariantEditor from '@/components/CMFVariantEditor';
+import CMFEditControl from '@/components/CMFEditControl';
 import { EBOMControl, PBOMControl, MBOMControl, type BOMControlConfig } from '@/components/BOM';
 import { ROLE_CODES, taskRoleApi, TaskRole } from '@/constants/roles';
 import type { ColumnsType } from 'antd/es/table';
@@ -2850,7 +2850,7 @@ const ProjectDetail: React.FC = () => {
             {
               key: 'cmf',
               label: 'CMF配色',
-              children: <CMFVariantEditor projectId={project.id} mode="view" />,
+              children: <CMFEditControl projectId={project.id} readonly />,
             },
             {
               key: 'documents',
