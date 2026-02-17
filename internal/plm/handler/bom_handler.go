@@ -300,6 +300,41 @@ func (h *BOMHandler) SearchItemsPaginated(c *gin.Context) {
 	})
 }
 
+// GlobalSearch GET /api/v1/bom-items/global
+func (h *BOMHandler) GlobalSearch(c *gin.Context) {
+	keyword := c.Query("q")
+	category := c.Query("category")
+	subCategory := c.Query("sub_category")
+	bomID := c.Query("bom_id")
+	projectID := c.Query("project_id")
+	supplierID := c.Query("supplier_id")
+	manufacturerID := c.Query("manufacturer_id")
+	page := 1
+	pageSize := 20
+	if p := c.Query("page"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil && n > 0 {
+			page = n
+		}
+	}
+	if ps := c.Query("page_size"); ps != "" {
+		if n, err := strconv.Atoi(ps); err == nil && n > 0 {
+			pageSize = n
+		}
+	}
+	items, total, err := h.svc.GlobalSearchItems(c.Request.Context(), keyword, category, subCategory, bomID, projectID, supplierID, manufacturerID, page, pageSize)
+	if err != nil {
+		InternalError(c, "搜索物料失败: "+err.Error())
+		return
+	}
+	c.JSON(200, gin.H{
+		"code":      0,
+		"data":      items,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
+}
+
 func (h *BOMHandler) DeleteBOM(c *gin.Context) {
 	bomID := c.Param("bomId")
 	if err := h.svc.DeleteBOM(c.Request.Context(), bomID); err != nil {

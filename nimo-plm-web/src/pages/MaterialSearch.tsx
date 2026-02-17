@@ -2,10 +2,12 @@ import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Input, Table, Tag, Typography, Select, Card,
+  Input, Table, Tag, Typography, Select, Card, Space,
 } from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 import { projectBomApi } from '@/api/projectBom';
+import { projectApi } from '@/api/projects';
+import { srmApi } from '@/api/srm';
 import { CATEGORY_LABELS, SUB_CATEGORY_LABELS } from '@/components/BOM/bomConstants';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import type { ColumnsType } from 'antd/es/table';
@@ -41,14 +43,49 @@ const MaterialSearch: React.FC = () => {
   const isMobile = useIsMobile();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const [supplierId, setSupplierId] = useState('');
+  const [manufacturerId, setManufacturerId] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
+  // Fetch projects for filter dropdown
+  const { data: projectsData } = useQuery({
+    queryKey: ['projects-filter'],
+    queryFn: () => projectApi.list({ page_size: 200 }),
+    staleTime: 60_000,
+  });
+  const projectOptions = useMemo(() => {
+    const items = projectsData?.items || [];
+    return [{ label: '全部项目', value: '' }, ...items.map((p: any) => ({ label: p.name, value: p.id }))];
+  }, [projectsData]);
+
+  // Fetch suppliers for filter dropdown
+  const { data: suppliersData } = useQuery({
+    queryKey: ['suppliers-filter'],
+    queryFn: () => srmApi.listSuppliers({ page_size: 200 }),
+    staleTime: 60_000,
+  });
+  const supplierOptions = useMemo(() => {
+    const items = suppliersData?.items || [];
+    return [{ label: '全部供应商', value: '' }, ...items.map((s: any) => ({ label: s.short_name || s.name, value: s.id }))];
+  }, [suppliersData]);
+
+  // Manufacturer options: filter suppliers that are manufacturer type
+  const manufacturerOptions = useMemo(() => {
+    const items = suppliersData?.items || [];
+    const mfrs = items.filter((s: any) => s.category === 'manufacturer' || s.category === 'both');
+    return [{ label: '全部制造商', value: '' }, ...mfrs.map((s: any) => ({ label: s.short_name || s.name, value: s.id }))];
+  }, [suppliersData]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['material-search', search, category, page, pageSize],
-    queryFn: () => projectBomApi.searchItemsPaginated({
+    queryKey: ['material-global-search', search, category, projectId, supplierId, manufacturerId, page, pageSize],
+    queryFn: () => projectBomApi.globalSearch({
       q: search || undefined,
       category: category || undefined,
+      project_id: projectId || undefined,
+      supplier_id: supplierId || undefined,
+      manufacturer_id: manufacturerId || undefined,
       page,
       page_size: pageSize,
     }),
@@ -91,14 +128,24 @@ const MaterialSearch: React.FC = () => {
       render: (v: string) => <Text style={{ fontSize: 12 }}>{SUB_CATEGORY_LABELS[v] || v || '-'}</Text>,
     },
     {
-      title: '供应商', dataIndex: 'supplier', key: 'supplier', width: 100, ellipsis: true,
-      render: (v: string) => <Text style={{ fontSize: 12 }}>{v || '-'}</Text>,
-    },
-    {
       title: 'MPN', dataIndex: 'mpn', key: 'mpn', width: 130, ellipsis: true,
       render: (v: string) => v ? (
         <Text code style={{ fontSize: 11 }}>{v}</Text>
       ) : <Text type="secondary" style={{ fontSize: 11 }}>-</Text>,
+    },
+    {
+      title: '制造商', key: 'manufacturer_name', width: 100, ellipsis: true,
+      render: (_: any, record: any) => {
+        const name = record.manufacturer_name || record.extended_attrs?.manufacturer || '';
+        return name ? <Text style={{ fontSize: 12 }}>{name}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>-</Text>;
+      },
+    },
+    {
+      title: '供应商', key: 'supplier_display', width: 100, ellipsis: true,
+      render: (_: any, record: any) => {
+        const name = record.supplier_name || record.supplier || '';
+        return name ? <Text style={{ fontSize: 12 }}>{name}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>-</Text>;
+      },
     },
     {
       title: '数量', dataIndex: 'quantity', key: 'quantity', width: 70, align: 'right',
@@ -113,20 +160,16 @@ const MaterialSearch: React.FC = () => {
       ) : <Text type="secondary" style={{ fontSize: 11 }}>-</Text>,
     },
     {
-      title: '小计', key: 'extended_cost', width: 100, align: 'right',
-      render: (_: any, record: any) => {
-        const cost = record.extended_cost ?? ((record.quantity || 0) * (record.unit_price || 0));
-        return cost > 0 ? (
-          <Text strong style={{ fontSize: 12 }}>{formatCurrency(cost)}</Text>
-        ) : <Text type="secondary" style={{ fontSize: 11 }}>-</Text>;
-      },
+      title: 'BOM', key: 'bom_info', width: 110, ellipsis: true,
+      render: (_: any, record: any) => (
+        <span style={{ fontSize: 12 }}>
+          {record.bom_type && <Tag style={{ fontSize: 10, marginRight: 4 }}>{record.bom_type}</Tag>}
+          {record.bom_name || '-'}
+        </span>
+      ),
     },
     {
-      title: 'BOM类型', dataIndex: 'bom_type', key: 'bom_type', width: 80,
-      render: (v: string) => v ? <Tag style={{ fontSize: 11 }}>{v}</Tag> : '-',
-    },
-    {
-      title: '所属项目', dataIndex: 'project_name', key: 'project_name', width: 120, ellipsis: true,
+      title: '所属项目', dataIndex: 'project_name', key: 'project_name', width: 130, ellipsis: true,
       render: (v: string, record: any) => v ? (
         <a onClick={() => record.project_id && navigate(`/bom-management/${record.project_id}`)} style={{ fontSize: 12 }}>
           {v}
@@ -134,6 +177,15 @@ const MaterialSearch: React.FC = () => {
       ) : <Text type="secondary" style={{ fontSize: 11 }}>-</Text>,
     },
   ];
+
+  const resetFilters = () => {
+    setSearch('');
+    setCategory('');
+    setProjectId('');
+    setSupplierId('');
+    setManufacturerId('');
+    setPage(1);
+  };
 
   // Mobile: simplified card view
   if (isMobile) {
@@ -145,15 +197,26 @@ const MaterialSearch: React.FC = () => {
           value={search}
           onChange={e => { setSearch(e.target.value); setPage(1); }}
           allowClear
-          style={{ marginBottom: 12 }}
+          style={{ marginBottom: 8 }}
         />
-        <Select
-          value={category}
-          onChange={v => { setCategory(v); setPage(1); }}
-          options={CATEGORY_OPTIONS}
-          style={{ width: '100%', marginBottom: 12 }}
-        />
-        {/* Cost summary */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+          <Select
+            value={category}
+            onChange={v => { setCategory(v); setPage(1); }}
+            options={CATEGORY_OPTIONS}
+            style={{ flex: 1, minWidth: 100 }}
+            size="small"
+          />
+          <Select
+            value={projectId}
+            onChange={v => { setProjectId(v); setPage(1); }}
+            options={projectOptions}
+            style={{ flex: 1, minWidth: 100 }}
+            size="small"
+            showSearch
+            optionFilterProp="label"
+          />
+        </div>
         {items.length > 0 && (
           <div style={{
             padding: '8px 12px', background: '#f6ffed', borderRadius: 6,
@@ -185,7 +248,9 @@ const MaterialSearch: React.FC = () => {
             </div>
             <div style={{ marginTop: 4, fontSize: 12, color: '#666' }}>
               {item.mpn && <Text code style={{ fontSize: 11, marginRight: 8 }}>{item.mpn}</Text>}
-              {item.supplier && <Text style={{ marginRight: 8 }}>供应商: {item.supplier}</Text>}
+              {(item.supplier_name || item.supplier) && (
+                <Text style={{ marginRight: 8 }}>供应商: {item.supplier_name || item.supplier}</Text>
+              )}
               <Text>数量: {item.quantity} {item.unit}</Text>
               {item.unit_price > 0 && <Text style={{ marginLeft: 8 }}>单价: {formatCurrency(item.unit_price)}</Text>}
             </div>
@@ -209,22 +274,56 @@ const MaterialSearch: React.FC = () => {
   return (
     <div>
       {/* Search & Filter Bar */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <Input
-          prefix={<SearchOutlined />}
-          placeholder="搜索物料名称、MPN、供应商..."
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1); }}
-          allowClear
-          style={{ width: 360 }}
-        />
-        <Select
-          value={category}
-          onChange={v => { setCategory(v); setPage(1); }}
-          options={CATEGORY_OPTIONS}
-          style={{ width: 150 }}
-        />
-      </div>
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Space wrap size="middle">
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder="搜索物料名称、MPN、供应商..."
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+            allowClear
+            style={{ width: 320 }}
+          />
+          <Select
+            value={category}
+            onChange={v => { setCategory(v); setPage(1); }}
+            options={CATEGORY_OPTIONS}
+            style={{ width: 130 }}
+          />
+          <Select
+            value={projectId}
+            onChange={v => { setProjectId(v); setPage(1); }}
+            options={projectOptions}
+            style={{ width: 180 }}
+            showSearch
+            optionFilterProp="label"
+            placeholder="筛选项目"
+          />
+          <Select
+            value={supplierId}
+            onChange={v => { setSupplierId(v); setPage(1); }}
+            options={supplierOptions}
+            style={{ width: 160 }}
+            showSearch
+            optionFilterProp="label"
+            placeholder="筛选供应商"
+          />
+          <Select
+            value={manufacturerId}
+            onChange={v => { setManufacturerId(v); setPage(1); }}
+            options={manufacturerOptions}
+            style={{ width: 160 }}
+            showSearch
+            optionFilterProp="label"
+            placeholder="筛选制造商"
+          />
+          {(search || category || projectId || supplierId || manufacturerId) && (
+            <a onClick={resetFilters} style={{ fontSize: 12 }}>
+              <ReloadOutlined /> 重置
+            </a>
+          )}
+        </Space>
+      </Card>
 
       {/* Cost Summary Bar */}
       {items.length > 0 && (
@@ -255,12 +354,13 @@ const MaterialSearch: React.FC = () => {
         rowKey="id"
         loading={isLoading}
         size="small"
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1300 }}
         pagination={{
           current: page,
           pageSize,
           total,
           showSizeChanger: true,
+          showQuickJumper: true,
           showTotal: (t) => `共 ${t} 项`,
           onChange: (p, ps) => { setPage(p); setPageSize(ps); },
         }}

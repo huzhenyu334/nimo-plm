@@ -418,6 +418,21 @@ func (s *ProjectBOMService) SearchItemsPaginated(ctx context.Context, keyword, c
 	return s.bomRepo.SearchItemsPaginated(ctx, keyword, category, subCategory, bomID, page, pageSize)
 }
 
+// GlobalSearchItems 全局物料搜索（支持project/supplier/manufacturer筛选）
+func (s *ProjectBOMService) GlobalSearchItems(ctx context.Context, keyword, category, subCategory, bomID, projectID, supplierID, manufacturerID string, page, pageSize int) ([]repository.MaterialSearchResult, int64, error) {
+	return s.bomRepo.GlobalSearchItems(ctx, repository.GlobalSearchParams{
+		Keyword:        keyword,
+		Category:       category,
+		SubCategory:    subCategory,
+		BOMID:          bomID,
+		ProjectID:      projectID,
+		SupplierID:     supplierID,
+		ManufacturerID: manufacturerID,
+		Page:           page,
+		PageSize:       pageSize,
+	})
+}
+
 // DeleteItem 删除BOM行项
 func (s *ProjectBOMService) DeleteItem(ctx context.Context, bomID, itemID string) error {
 	bom, err := s.bomRepo.FindByID(ctx, bomID)

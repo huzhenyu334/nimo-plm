@@ -541,6 +541,23 @@ export const projectBomApi = {
     const d = response.data as any;
     return { data: d.data || [], total: d.total || 0, page: d.page || 1, page_size: d.page_size || 20 };
   },
+
+  // 全局物料搜索（支持项目/供应商/制造商筛选）
+  globalSearch: async (params: {
+    q?: string;
+    category?: string;
+    sub_category?: string;
+    bom_id?: string;
+    project_id?: string;
+    supplier_id?: string;
+    manufacturer_id?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ data: any[]; total: number; page: number; page_size: number }> => {
+    const response = await apiClient.get('/bom-items/global', { params });
+    const d = response.data as any;
+    return { data: d.data || [], total: d.total || 0, page: d.page || 1, page_size: d.page_size || 20 };
+  },
 };
 
 export interface BOMPermissions {

@@ -202,50 +202,92 @@ func (r *ProjectBOMRepository) SearchItems(ctx context.Context, keyword string, 
 // MaterialSearchResult wraps a BOM item with its parent BOM's project/type info
 type MaterialSearchResult struct {
 	entity.ProjectBOMItem
-	ProjectID   string `json:"project_id" gorm:"column:project_id"`
-	BOMType     string `json:"bom_type" gorm:"column:bom_type"`
-	ProjectName string `json:"project_name" gorm:"column:project_name"`
+	ProjectID        string  `json:"project_id" gorm:"column:project_id"`
+	BOMType          string  `json:"bom_type" gorm:"column:bom_type"`
+	BOMName          string  `json:"bom_name" gorm:"column:bom_name"`
+	ProjectName      string  `json:"project_name" gorm:"column:project_name"`
+	SupplierName     *string `json:"supplier_name" gorm:"column:supplier_name"`
+	ManufacturerName *string `json:"manufacturer_name" gorm:"column:manufacturer_name"`
+}
+
+// GlobalSearchParams 全局物料搜索参数
+type GlobalSearchParams struct {
+	Keyword        string
+	Category       string
+	SubCategory    string
+	BOMID          string
+	ProjectID      string
+	SupplierID     string
+	ManufacturerID string
+	Page           int
+	PageSize       int
 }
 
 // SearchItemsPaginated 跨项目搜索BOM行项（分页版，用于全局物料查询页面）
 func (r *ProjectBOMRepository) SearchItemsPaginated(ctx context.Context, keyword, category, subCategory, bomID string, page, pageSize int) ([]MaterialSearchResult, int64, error) {
-	if pageSize <= 0 || pageSize > 100 {
-		pageSize = 20
+	return r.GlobalSearchItems(ctx, GlobalSearchParams{
+		Keyword:     keyword,
+		Category:    category,
+		SubCategory: subCategory,
+		BOMID:       bomID,
+		Page:        page,
+		PageSize:    pageSize,
+	})
+}
+
+// GlobalSearchItems 全局物料搜索（支持project/supplier/manufacturer筛选）
+func (r *ProjectBOMRepository) GlobalSearchItems(ctx context.Context, params GlobalSearchParams) ([]MaterialSearchResult, int64, error) {
+	if params.PageSize <= 0 || params.PageSize > 100 {
+		params.PageSize = 20
 	}
-	if page <= 0 {
-		page = 1
+	if params.Page <= 0 {
+		params.Page = 1
 	}
 	var total int64
-	query := r.db.WithContext(ctx).Model(&entity.ProjectBOMItem{})
-	if keyword != "" {
-		like := "%" + keyword + "%"
+	query := r.db.WithContext(ctx).Model(&entity.ProjectBOMItem{}).
+		Joins("LEFT JOIN project_boms ON project_boms.id = project_bom_items.bom_id").
+		Joins("LEFT JOIN projects ON projects.id = project_boms.project_id")
+
+	if params.Keyword != "" {
+		like := "%" + params.Keyword + "%"
 		query = query.Where(
 			"project_bom_items.name ILIKE ? OR project_bom_items.mpn ILIKE ? OR project_bom_items.supplier ILIKE ? OR project_bom_items.extended_attrs->>'specification' ILIKE ?",
 			like, like, like, like,
 		)
 	}
-	if category != "" {
-		query = query.Where("project_bom_items.category = ?", category)
+	if params.Category != "" {
+		query = query.Where("project_bom_items.category = ?", params.Category)
 	}
-	if subCategory != "" {
-		query = query.Where("project_bom_items.sub_category = ?", subCategory)
+	if params.SubCategory != "" {
+		query = query.Where("project_bom_items.sub_category = ?", params.SubCategory)
 	}
-	if bomID != "" {
-		query = query.Where("project_bom_items.bom_id = ?", bomID)
+	if params.BOMID != "" {
+		query = query.Where("project_bom_items.bom_id = ?", params.BOMID)
 	}
+	if params.ProjectID != "" {
+		query = query.Where("project_boms.project_id = ?", params.ProjectID)
+	}
+	if params.SupplierID != "" {
+		query = query.Where("project_bom_items.supplier_id = ?", params.SupplierID)
+	}
+	if params.ManufacturerID != "" {
+		query = query.Where("project_bom_items.manufacturer_id = ?", params.ManufacturerID)
+	}
+
 	// Count total
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	// Fetch with joins to get project/bom info
+
+	// Fetch with joins to get project/bom/supplier/manufacturer info
 	var items []MaterialSearchResult
 	err := query.
-		Joins("LEFT JOIN project_boms ON project_boms.id = project_bom_items.bom_id").
-		Joins("LEFT JOIN projects ON projects.id = project_boms.project_id").
-		Select("project_bom_items.*, project_boms.project_id, project_boms.bom_type, projects.name as project_name").
+		Joins("LEFT JOIN srm_suppliers AS sup ON sup.id = project_bom_items.supplier_id").
+		Joins("LEFT JOIN srm_suppliers AS mfr ON mfr.id = project_bom_items.manufacturer_id").
+		Select("project_bom_items.*, project_boms.project_id, project_boms.bom_type, project_boms.name as bom_name, projects.name as project_name, sup.name as supplier_name, mfr.name as manufacturer_name").
 		Order("project_bom_items.updated_at DESC").
-		Offset((page - 1) * pageSize).
-		Limit(pageSize).
+		Offset((params.Page - 1) * params.PageSize).
+		Limit(params.PageSize).
 		Find(&items).Error
 	return items, total, err
 }
