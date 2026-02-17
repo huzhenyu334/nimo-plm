@@ -531,17 +531,19 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
     queryFn: () => cmfVariantApi.getAppearanceParts(projectId),
   });
 
-  // Sync server data → local state only on initial load
-  const initializedRef = useRef(false);
+  // Sync server data → local state (skip during save to avoid overwriting local edits)
   useEffect(() => {
-    if (initializedRef.current) return; // Don't overwrite local state on refetch
-    if (!parts.length) return;
+    if (syncingRef.current) return; // Don't overwrite during auto-save
+    if (!parts.length) {
+      serverVariantsRef.current = [];
+      setLocalVariants([]);
+      return;
+    }
     const allVariants: Record<string, any>[] = parts.flatMap(p =>
       (p.cmf_variants || []).map(v => ({ ...v }))
     );
     serverVariantsRef.current = allVariants;
     setLocalVariants(allVariants);
-    initializedRef.current = true;
   }, [parts]);
 
   // Get variants for a specific bom_item
@@ -639,9 +641,16 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
           return v;
         });
         serverVariantsRef.current = updated;
-        if (Object.keys(idMapping).length > 0) {
-          setLocalVariants(updated);
-        }
+        setLocalVariants(updated);
+
+        // Update query cache so next mount gets fresh data instantly
+        queryClient.setQueryData(['appearance-parts', projectId], (old: any) => {
+          if (!old) return old;
+          return old.map((part: any) => ({
+            ...part,
+            cmf_variants: updated.filter((v: any) => v.bom_item_id === part.bom_item_id),
+          }));
+        });
 
       } catch {
         message.error('保存失败');
