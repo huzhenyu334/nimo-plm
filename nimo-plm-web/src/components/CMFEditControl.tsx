@@ -532,8 +532,10 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
   });
 
   // Sync server data → local state (skip during save to avoid overwriting local edits)
+  const partsVersionRef = useRef(0);
+  const [partsVersion, setPartsVersion] = useState(0);
   useEffect(() => {
-    if (syncingRef.current) return; // Don't overwrite during auto-save
+    if (syncingRef.current) return;
     if (!parts.length) {
       serverVariantsRef.current = [];
       setLocalVariants([]);
@@ -544,6 +546,8 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
     );
     serverVariantsRef.current = allVariants;
     setLocalVariants(allVariants);
+    partsVersionRef.current += 1;
+    setPartsVersion(partsVersionRef.current);
   }, [parts]);
 
   // Get variants for a specific bom_item
@@ -665,7 +669,7 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
     };
   }, [localVariants, projectId, readonly, queryClient, message]);
 
-  if (isLoading) {
+  if (isLoading || (partsVersion === 0 && parts.length > 0)) {
     return <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="加载CMF数据..." /></div>;
   }
 
