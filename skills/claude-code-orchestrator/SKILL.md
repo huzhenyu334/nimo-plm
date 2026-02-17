@@ -120,6 +120,15 @@ Write focused, specific prompts. Include:
 - Build/deploy commands
 - Test requirements
 
+**每个任务末尾必须附带 Git Commit 指令：**
+```
+### Git Commit（必须执行）
+任务完成、编译部署成功后，执行：
+git add -A -- ':!.openclaw/' ':!internal/plm/handler/uploads/' ':!nimo-plm-web/playwright-report/' ':!nimo-plm-web/screenshots/' ':!nimo-plm-web/test-results/' ':!uploads/'
+git commit -m "<简洁描述本次改动>"
+git push
+```
+
 Example:
 ```
 ## Task: Add user avatar to profile page
@@ -137,6 +146,11 @@ Example:
 ### Testing
 - Add Playwright E2E test verifying avatar displays after upload
 - Run: cd web && npx playwright test
+
+### Git Commit（必须执行）
+git add -A -- ':!.openclaw/' ':!uploads/'
+git commit -m "feat: add user avatar to profile page"
+git push
 ```
 
 ### 7. Completion Detection

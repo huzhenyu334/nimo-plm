@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   Input,
   Select,
@@ -25,7 +25,7 @@ import {
   RightOutlined,
 } from '@ant-design/icons';
 import { taskFormApi } from '@/api/taskForms';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { cmfVariantApi, type CMFVariant, type AppearancePartWithCMF } from '@/api/cmfVariant';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import EditableTable, { type EditableColumn } from './EditableTable';
@@ -44,6 +44,13 @@ const GLOSS_OPTS = GLOSS_OPTIONS.map(o => ({ label: o, value: o }));
 const FINISH_OPTS = FINISH_OPTIONS.map(o => ({ label: o, value: o }));
 const TEXTURE_OPTS = TEXTURE_OPTIONS.map(o => ({ label: o, value: o }));
 const COATING_OPTS = COATING_OPTIONS.map(o => ({ label: o, value: o }));
+
+// Fields to compare for auto-save diff
+const CMF_FIELDS = [
+  'color_hex', 'pantone_code', 'gloss_level', 'finish', 'texture', 'coating',
+  'reference_image_file_id', 'reference_image_url',
+  'process_drawing_type', 'process_drawings', 'notes',
+];
 
 interface DrawingFile {
   file_id: string;
@@ -65,43 +72,17 @@ interface CMFEditControlProps {
   readonly?: boolean;
 }
 
-// ========== Part Section (uses EditableTable) ==========
+// ========== Part Section (pure onChange, no mutations) ==========
 const PartSection: React.FC<{
-  part: AppearancePartWithCMF;
-  projectId: string;
+  bomItem: { id: string; name: string; item_number: number; thumbnail_url?: string };
+  variants: Record<string, any>[];
+  onVariantsChange: (newVariants: Record<string, any>[]) => void;
+  onAddVariant: () => void;
   readonly: boolean;
-  onAddVariant: (itemId: string) => void;
-  addLoading: boolean;
-}> = ({ part, projectId, readonly, onAddVariant, addLoading }) => {
+}> = ({ bomItem, variants, onVariantsChange, onAddVariant, readonly }) => {
   const { message } = App.useApp();
-  const queryClient = useQueryClient();
-  const item = part.bom_item;
-  const variants = part.cmf_variants || [];
 
-  const updateMutation = useMutation({
-    mutationFn: ({ variantId, data }: { variantId: string; data: Partial<CMFVariant> }) =>
-      cmfVariantApi.updateVariant(projectId, variantId, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appearance-parts', projectId] }),
-    onError: (err: any) => message.error(err?.response?.data?.message || '保存失败'),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (variantId: string) =>
-      cmfVariantApi.deleteVariant(projectId, variantId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['appearance-parts', projectId] }),
-    onError: (err: any) => message.error(err?.response?.data?.message || '删除失败'),
-  });
-
-  const handleCellSave = (record: Record<string, any>, field: string, value: any) => {
-    if (value === record[field]) return;
-    updateMutation.mutate({ variantId: record.id, data: { [field]: value } });
-  };
-
-  const handleDeleteRow = (record: Record<string, any>) => {
-    deleteMutation.mutate(record.id);
-  };
-
-  const cmfColumns: EditableColumn[] = React.useMemo(() => [
+  const cmfColumns: EditableColumn[] = useMemo(() => [
     {
       key: 'variant_index', title: '版本', width: 50, editable: false,
       render: (v: any) => <Tag color="processing" style={{ margin: 0, fontSize: 11 }}>V{v}</Tag>,
@@ -128,10 +109,11 @@ const PartSection: React.FC<{
           <Upload showUploadList={false} accept="image/*"
             beforeUpload={(file) => {
               taskFormApi.uploadFile(file).then((result) => {
-                updateMutation.mutate({ variantId: record.id, data: {
-                  reference_image_file_id: result.id,
-                  reference_image_url: result.url,
-                }});
+                onVariantsChange(variants.map(v =>
+                  v.id === record.id
+                    ? { ...v, reference_image_file_id: result.id, reference_image_url: result.url }
+                    : v
+                ));
               }).catch(() => message.error('上传失败'));
               return false;
             }}>
@@ -164,9 +146,11 @@ const PartSection: React.FC<{
             beforeUpload={(file) => {
               taskFormApi.uploadFile(file).then((result) => {
                 const newDrawings = [...drawings, { file_id: result.id, file_name: result.filename || file.name, url: result.url }];
-                updateMutation.mutate({ variantId: record.id, data: {
-                  process_drawings: JSON.stringify(newDrawings) as any,
-                }});
+                onVariantsChange(variants.map(v =>
+                  v.id === record.id
+                    ? { ...v, process_drawings: JSON.stringify(newDrawings) }
+                    : v
+                ));
               }).catch(() => message.error('上传失败'));
               return false;
             }}>
@@ -176,31 +160,25 @@ const PartSection: React.FC<{
       },
     },
     { key: 'notes', title: '备注', width: 120 },
-  ], [readonly, updateMutation, message]);
+  ], [readonly, variants, onVariantsChange, message]);
 
   return (
     <div style={{ marginBottom: 12 }}>
-      {/* Section header — matches BOM sub-category style */}
+      {/* Section header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px',
         background: '#fff7e6', borderRadius: '4px 4px 0 0',
         borderBottom: '1px solid #f0f0f0',
       }}>
-        {item.thumbnail_url && (
-          <img src={item.thumbnail_url} alt="" width={24} height={18}
+        {bomItem.thumbnail_url && (
+          <img src={bomItem.thumbnail_url} alt="" width={24} height={18}
             style={{ objectFit: 'contain', borderRadius: 3, background: '#f5f5f5' }} />
         )}
-        <Text style={{ fontSize: 13, fontWeight: 500 }}>#{item.item_number} {item.name}</Text>
+        <Text style={{ fontSize: 13, fontWeight: 500 }}>#{bomItem.item_number} {bomItem.name}</Text>
         <Tag style={{ fontSize: 11 }}>{variants.length} 方案</Tag>
         <div style={{ flex: 1 }} />
         {!readonly && (
-          <Button
-            type="dashed"
-            size="small"
-            icon={<PlusOutlined />}
-            onClick={() => onAddVariant(item.id)}
-            loading={addLoading}
-          >
+          <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={onAddVariant}>
             添加方案
           </Button>
         )}
@@ -210,9 +188,8 @@ const PartSection: React.FC<{
       {variants.length > 0 ? (
         <EditableTable
           columns={cmfColumns}
-          items={variants as Record<string, any>[]}
-          onCellSave={handleCellSave}
-          onDeleteRow={handleDeleteRow}
+          items={variants}
+          onChange={onVariantsChange}
           readonly={readonly}
           rowKey="id"
           deleteConfirmText="确认删除此CMF方案？"
@@ -228,24 +205,23 @@ const PartSection: React.FC<{
 
 // ========== 移动端: CMF变体全屏编辑面板 ==========
 const CMFMobileEditPanel: React.FC<{
-  variant: CMFVariant;
-  projectId: string;
+  variant: Record<string, any>;
   readonly: boolean;
+  onSave: (variantId: string, data: Record<string, any>) => void;
   onClose: () => void;
-}> = ({ variant, projectId, readonly, onClose }) => {
+}> = ({ variant, readonly, onSave, onClose }) => {
   const { message } = App.useApp();
-  const queryClient = useQueryClient();
-  const [visible, setVisible] = React.useState(false);
+  const [visible, setVisible] = useState(false);
   const [form] = Form.useForm();
 
-  const [renderUploading, setRenderUploading] = React.useState(false);
-  const [drawingUploading, setDrawingUploading] = React.useState(false);
-  const [renderImageId, setRenderImageId] = React.useState(variant.reference_image_file_id || '');
-  const [renderImageUrl, setRenderImageUrlState] = React.useState(variant.reference_image_url || '');
-  const [drawingType, setDrawingType] = React.useState(variant.process_drawing_type || '');
-  const [drawings, setDrawings] = React.useState<DrawingFile[]>(parseDrawings(variant.process_drawings));
+  const [renderUploading, setRenderUploading] = useState(false);
+  const [drawingUploading, setDrawingUploading] = useState(false);
+  const [renderImageId, setRenderImageId] = useState(variant.reference_image_file_id || '');
+  const [renderImageUrl, setRenderImageUrlState] = useState(variant.reference_image_url || '');
+  const [drawingType, setDrawingType] = useState(variant.process_drawing_type || '');
+  const [drawings, setDrawings] = useState<DrawingFile[]>(parseDrawings(variant.process_drawings));
 
-  React.useEffect(() => {
+  useEffect(() => {
     requestAnimationFrame(() => setVisible(true));
   }, []);
 
@@ -253,17 +229,6 @@ const CMFMobileEditPanel: React.FC<{
     setVisible(false);
     setTimeout(onClose, 300);
   };
-
-  const updateMutation = useMutation({
-    mutationFn: (data: Partial<CMFVariant>) =>
-      cmfVariantApi.updateVariant(projectId, variant.id, data),
-    onSuccess: () => {
-      message.success('已保存');
-      queryClient.invalidateQueries({ queryKey: ['appearance-parts', projectId] });
-      handleClose();
-    },
-    onError: (err: any) => message.error(err?.response?.data?.message || '保存失败'),
-  });
 
   const handleSave = () => {
     form.validateFields().then(values => {
@@ -274,7 +239,8 @@ const CMFMobileEditPanel: React.FC<{
       values.reference_image_url = renderImageUrl;
       values.process_drawing_type = drawingType;
       values.process_drawings = JSON.stringify(drawings);
-      updateMutation.mutate(values);
+      onSave(variant.id, values);
+      handleClose();
     });
   };
 
@@ -335,7 +301,6 @@ const CMFMobileEditPanel: React.FC<{
           <Button
             type="primary"
             onClick={handleSave}
-            loading={updateMutation.isPending}
             style={{ borderRadius: 8, fontWeight: 500 }}
           >
             保存
@@ -483,7 +448,7 @@ const mfSectionTitleStyle: React.CSSProperties = {
 
 // ========== 移动端: CMF摘要卡片 ==========
 const MobileVariantSummaryCard: React.FC<{
-  variant: CMFVariant;
+  variant: Record<string, any>;
   onClick: () => void;
 }> = ({ variant, onClick }) => {
   const renderImageUrl = variant.reference_image_file_id
@@ -552,22 +517,145 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
-  const [editingVariant, setEditingVariant] = React.useState<CMFVariant | null>(null);
+  const [editingVariant, setEditingVariant] = useState<Record<string, any> | null>(null);
 
+  // Local state — single source of truth for UI
+  const [localVariants, setLocalVariants] = useState<Record<string, any>[]>([]);
+  const serverVariantsRef = useRef<Record<string, any>[]>([]);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncingRef = useRef(false);
+
+  // Fetch server data
   const { data: parts = [], isLoading } = useQuery({
     queryKey: ['appearance-parts', projectId],
     queryFn: () => cmfVariantApi.getAppearanceParts(projectId),
   });
 
-  const createMutation = useMutation({
-    mutationFn: ({ itemId }: { itemId: string }) =>
-      cmfVariantApi.createVariant(projectId, itemId, {}),
-    onSuccess: () => {
-      message.success('已添加CMF方案');
-      queryClient.invalidateQueries({ queryKey: ['appearance-parts', projectId] });
-    },
-    onError: (err: any) => message.error(err?.response?.data?.message || '添加失败'),
-  });
+  // Sync server data → local state when parts change
+  useEffect(() => {
+    if (!parts.length) {
+      serverVariantsRef.current = [];
+      setLocalVariants([]);
+      return;
+    }
+    const allVariants: Record<string, any>[] = parts.flatMap(p =>
+      (p.cmf_variants || []).map(v => ({ ...v }))
+    );
+    serverVariantsRef.current = allVariants;
+    setLocalVariants(allVariants);
+  }, [parts]);
+
+  // Get variants for a specific bom_item
+  const getVariantsForItem = useCallback((itemId: string) =>
+    localVariants.filter(v => v.bom_item_id === itemId),
+  [localVariants]);
+
+  // Handle variants change for a specific bom_item
+  const handleVariantsChange = useCallback((itemId: string, newItemVariants: Record<string, any>[]) => {
+    setLocalVariants(prev => [
+      ...prev.filter(v => v.bom_item_id !== itemId),
+      ...newItemVariants,
+    ]);
+  }, []);
+
+  // Add variant — instant local, auto-save creates on server
+  const handleAddVariant = useCallback((itemId: string) => {
+    const itemVariants = localVariants.filter(v => v.bom_item_id === itemId);
+    const maxIdx = itemVariants.reduce((m, v) => Math.max(m, v.variant_index || 0), 0);
+    setLocalVariants(prev => [...prev, {
+      id: 'new-' + Date.now(),
+      bom_item_id: itemId,
+      variant_index: maxIdx + 1,
+      color_hex: '', pantone_code: '', gloss_level: '', finish: '', texture: '',
+      coating: '', reference_image_file_id: '', reference_image_url: '',
+      process_drawing_type: '', process_drawings: '', notes: '', material_code: '',
+    }]);
+  }, [localVariants]);
+
+  // Mobile save — update local state
+  const handleMobileSave = useCallback((variantId: string, data: Record<string, any>) => {
+    setLocalVariants(prev => prev.map(v =>
+      v.id === variantId ? { ...v, ...data } : v
+    ));
+  }, []);
+
+  // ========== Auto-save: debounced diff & sync ==========
+  useEffect(() => {
+    if (readonly) return;
+    if (syncingRef.current) return;
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+
+    saveTimerRef.current = setTimeout(async () => {
+      if (syncingRef.current) return;
+      syncingRef.current = true;
+
+      try {
+        const server = serverVariantsRef.current;
+        const local = localVariants;
+        const serverIds = new Set(server.map(v => v.id));
+        const localIds = new Set(local.map(v => v.id));
+
+        // 1. Deleted variants (in server but not in local)
+        const deletedIds = [...serverIds].filter(id => !localIds.has(id));
+        for (const id of deletedIds) {
+          await cmfVariantApi.deleteVariant(projectId, id);
+        }
+
+        // 2. New variants (id starts with 'new-')
+        const newVariants = local.filter(v => typeof v.id === 'string' && v.id.startsWith('new-'));
+        const idMapping: Record<string, Record<string, any>> = {};
+        for (const v of newVariants) {
+          const payload: Record<string, any> = {};
+          for (const f of CMF_FIELDS) {
+            if (v[f]) payload[f] = v[f];
+          }
+          const created = await cmfVariantApi.createVariant(projectId, v.bom_item_id, payload);
+          idMapping[v.id] = created;
+        }
+
+        // 3. Updated variants (exist in both, check for changes)
+        const existing = local.filter(v =>
+          !(typeof v.id === 'string' && v.id.startsWith('new-')) && serverIds.has(v.id)
+        );
+        for (const v of existing) {
+          const sv = server.find(s => s.id === v.id);
+          if (!sv) continue;
+          const updateData: Record<string, any> = {};
+          let hasUpdate = false;
+          for (const f of CMF_FIELDS) {
+            if (String(v[f] ?? '') !== String(sv[f] ?? '')) {
+              updateData[f] = v[f] ?? '';
+              hasUpdate = true;
+            }
+          }
+          if (hasUpdate) {
+            await cmfVariantApi.updateVariant(projectId, v.id, updateData);
+          }
+        }
+
+        // Update refs — replace temp ids with server data
+        const updated = local.map(v => {
+          if (idMapping[v.id]) return { ...idMapping[v.id] };
+          return v;
+        });
+        serverVariantsRef.current = updated;
+        if (Object.keys(idMapping).length > 0) {
+          setLocalVariants(updated);
+        }
+
+      } catch {
+        message.error('保存失败');
+        queryClient.invalidateQueries({ queryKey: ['appearance-parts', projectId] });
+      } finally {
+        syncingRef.current = false;
+      }
+    }, 1500);
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [localVariants, projectId, readonly, queryClient, message]);
 
   if (isLoading) {
     return <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="加载CMF数据..." /></div>;
@@ -588,7 +676,7 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
 
         {parts.map((part: AppearancePartWithCMF) => {
           const item = part.bom_item;
-          const variants = part.cmf_variants || [];
+          const variants = getVariantsForItem(item.id);
 
           return (
             <div key={item.id} style={{ marginBottom: 16 }}>
@@ -618,8 +706,7 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
                 <Button
                   type="dashed"
                   icon={<PlusOutlined />}
-                  onClick={() => createMutation.mutate({ itemId: item.id })}
-                  loading={createMutation.isPending}
+                  onClick={() => handleAddVariant(item.id)}
                   block
                   style={{ borderRadius: 10, marginTop: 4 }}
                 >
@@ -633,8 +720,8 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
         {editingVariant && (
           <CMFMobileEditPanel
             variant={editingVariant}
-            projectId={projectId}
             readonly={readonly}
+            onSave={handleMobileSave}
             onClose={() => setEditingVariant(null)}
           />
         )}
@@ -649,18 +736,18 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
         <BgColorsOutlined style={{ color: '#1677ff' }} />
         <Text strong style={{ fontSize: 14 }}>CMF方案</Text>
         <Tag style={{ fontSize: 11 }}>
-          {parts.reduce((n: number, p: AppearancePartWithCMF) => n + (p.cmf_variants?.length || 0), 0)} 方案
+          {localVariants.length} 方案
         </Tag>
       </div>
 
       {parts.map((part: AppearancePartWithCMF) => (
         <PartSection
           key={part.bom_item.id}
-          part={part}
-          projectId={projectId}
+          bomItem={part.bom_item}
+          variants={getVariantsForItem(part.bom_item.id)}
+          onVariantsChange={(newVariants) => handleVariantsChange(part.bom_item.id, newVariants)}
+          onAddVariant={() => handleAddVariant(part.bom_item.id)}
           readonly={readonly}
-          onAddVariant={(itemId) => createMutation.mutate({ itemId })}
-          addLoading={createMutation.isPending}
         />
       ))}
     </div>
