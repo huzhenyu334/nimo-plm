@@ -531,18 +531,17 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
     queryFn: () => cmfVariantApi.getAppearanceParts(projectId),
   });
 
-  // Sync server data → local state when parts change
+  // Sync server data → local state only on initial load
+  const initializedRef = useRef(false);
   useEffect(() => {
-    if (!parts.length) {
-      serverVariantsRef.current = [];
-      setLocalVariants([]);
-      return;
-    }
+    if (initializedRef.current) return; // Don't overwrite local state on refetch
+    if (!parts.length) return;
     const allVariants: Record<string, any>[] = parts.flatMap(p =>
       (p.cmf_variants || []).map(v => ({ ...v }))
     );
     serverVariantsRef.current = allVariants;
     setLocalVariants(allVariants);
+    initializedRef.current = true;
   }, [parts]);
 
   // Get variants for a specific bom_item
