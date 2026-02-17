@@ -521,6 +521,7 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
 
   // Local state — single source of truth for UI
   const [localVariants, setLocalVariants] = useState<Record<string, any>[]>([]);
+  const [initialized, setInitialized] = useState(false);
   const serverVariantsRef = useRef<Record<string, any>[]>([]);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncingRef = useRef(false);
@@ -538,6 +539,7 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
     if (!parts.length) {
       serverVariantsRef.current = [];
       setLocalVariants([]);
+      setInitialized(true);
       return;
     }
     const allVariants: Record<string, any>[] = parts.flatMap(p =>
@@ -545,6 +547,7 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
     );
     serverVariantsRef.current = allVariants;
     setLocalVariants(allVariants);
+    setInitialized(true);
   }, [parts]);
 
   // Get variants for a specific bom_item
@@ -642,7 +645,10 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
           return v;
         });
         serverVariantsRef.current = updated;
-        setLocalVariants(updated);
+        // Only update local state if temp IDs were replaced (matching BOM pattern)
+        if (Object.keys(idMapping).length > 0) {
+          setLocalVariants(updated);
+        }
 
         // Refresh server cache in background (won't overwrite local because syncingRef is still true)
         await queryClient.invalidateQueries({ queryKey: ['appearance-parts', projectId] });
@@ -660,7 +666,7 @@ const CMFEditControl: React.FC<CMFEditControlProps> = ({ projectId, taskId: _tas
     };
   }, [localVariants, projectId, readonly, queryClient, message]);
 
-  if (isLoading) {
+  if (isLoading || !initialized) {
     return <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="加载CMF数据..." /></div>;
   }
 
