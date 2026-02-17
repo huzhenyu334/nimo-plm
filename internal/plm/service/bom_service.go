@@ -394,6 +394,17 @@ func (s *ProjectBOMService) BatchAddItems(ctx context.Context, bomID string, ite
 	return len(entities), nil
 }
 
+// DeleteBOM 删除整个BOM及其所有行项
+func (s *ProjectBOMService) DeleteBOM(ctx context.Context, bomID string) error {
+	if err := s.bomRepo.DeleteItemsByBOM(ctx, bomID); err != nil {
+		return fmt.Errorf("delete bom items: %w", err)
+	}
+	if err := s.bomRepo.Delete(ctx, bomID); err != nil {
+		return fmt.Errorf("delete bom: %w", err)
+	}
+	return nil
+}
+
 // DeleteItem 删除BOM行项
 func (s *ProjectBOMService) DeleteItem(ctx context.Context, bomID, itemID string) error {
 	bom, err := s.bomRepo.FindByID(ctx, bomID)

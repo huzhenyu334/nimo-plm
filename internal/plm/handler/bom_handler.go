@@ -248,6 +248,16 @@ func (h *BOMHandler) ReorderItems(c *gin.Context) {
 	Success(c, gin.H{"reordered": true})
 }
 
+// DeleteBOM DELETE /projects/:id/boms/:bomId
+func (h *BOMHandler) DeleteBOM(c *gin.Context) {
+	bomID := c.Param("bomId")
+	if err := h.svc.DeleteBOM(c.Request.Context(), bomID); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	Success(c, gin.H{"deleted": true})
+}
+
 // DeleteItem DELETE /projects/:id/boms/:bomId/items/:itemId
 func (h *BOMHandler) DeleteItem(c *gin.Context) {
 	bomID := c.Param("bomId")

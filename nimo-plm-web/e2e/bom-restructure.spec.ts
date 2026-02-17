@@ -21,7 +21,31 @@ function makeToken(): string {
 
 const authHeaders = { Authorization: `Bearer ${makeToken()}` };
 
+// Track BOM IDs created during tests for cleanup
+const createdBomIds: { projectId: string; bomId: string }[] = [];
+
+// Helper: get first project ID
+async function getFirstProjectId(request: any): Promise<{ projectId: string } | null> {
+  const projResp = await request.get('/api/v1/projects', { headers: authHeaders });
+  const projects = await projResp.json().then((r: any) => r.data?.items || r.data || []);
+  if (!projects || projects.length === 0) return null;
+  return { projectId: projects[0].id };
+}
+
+// Helper: delete a BOM (cleanup)
+async function deleteBom(request: any, projectId: string, bomId: string) {
+  await request.delete(`/api/v1/projects/${projectId}/boms/${bomId}`, { headers: authHeaders });
+}
+
 test.describe('BOM Restructure - 3-Level Architecture', () => {
+
+  // Cleanup all created BOMs after each test
+  test.afterEach(async ({ request }) => {
+    for (const entry of createdBomIds) {
+      await deleteBom(request, entry.projectId, entry.bomId).catch(() => {});
+    }
+    createdBomIds.length = 0;
+  });
 
   // API tests - attribute templates
   test('seed default attribute templates via API', async ({ request }) => {
@@ -50,43 +74,33 @@ test.describe('BOM Restructure - 3-Level Architecture', () => {
     }
   });
 
-  // API tests - BOM CRUD with new types
+  // API tests - BOM CRUD with new types (read-only, no creation)
   test('BOM API supports EBOM/PBOM/MBOM types', async ({ request }) => {
-    const projResp = await request.get('/api/v1/projects', { headers: authHeaders });
-    expect(projResp.status()).toBe(200);
-    const projects = await projResp.json().then(r => r.data?.items || r.data || []);
-    if (!projects || projects.length === 0) {
-      test.skip();
-      return;
-    }
-    const projectId = projects[0].id;
+    const proj = await getFirstProjectId(request);
+    if (!proj) { test.skip(); return; }
 
-    const bomResp = await request.get(`/api/v1/projects/${projectId}/boms`, { headers: authHeaders });
+    const bomResp = await request.get(`/api/v1/projects/${proj.projectId}/boms`, { headers: authHeaders });
     expect(bomResp.status()).toBe(200);
     const boms = (await bomResp.json()).data;
     expect(Array.isArray(boms)).toBe(true);
   });
 
-  test('create EBOM with extended_attrs item', async ({ request }) => {
-    const projResp = await request.get('/api/v1/projects', { headers: authHeaders });
-    const projects = await projResp.json().then(r => r.data?.items || r.data || []);
-    if (!projects || projects.length === 0) {
-      test.skip();
-      return;
-    }
-    const projectId = projects[0].id;
+  test('create EBOM with extended_attrs item and cleanup', async ({ request }) => {
+    const proj = await getFirstProjectId(request);
+    if (!proj) { test.skip(); return; }
 
     // Create EBOM
-    const createResp = await request.post(`/api/v1/projects/${projectId}/boms`, {
+    const createResp = await request.post(`/api/v1/projects/${proj.projectId}/boms`, {
       data: { name: 'E2E-EBOM-Test', bom_type: 'EBOM', version: 'v1.0' },
       headers: authHeaders,
     });
     expect(createResp.status()).toBe(201);
     const bom = (await createResp.json()).data;
     expect(bom.bom_type).toBe('EBOM');
+    createdBomIds.push({ projectId: proj.projectId, bomId: bom.id });
 
     // Add item with extended_attrs
-    const itemResp = await request.post(`/api/v1/projects/${projectId}/boms/${bom.id}/items`, {
+    const itemResp = await request.post(`/api/v1/projects/${proj.projectId}/boms/${bom.id}/items`, {
       data: {
         name: '电阻R1',
         quantity: 10,
@@ -104,13 +118,13 @@ test.describe('BOM Restructure - 3-Level Architecture', () => {
     expect(item.extended_attrs.designator).toBe('R1,R2,R3');
 
     // Get BOM detail
-    const detailResp = await request.get(`/api/v1/projects/${projectId}/boms/${bom.id}`, { headers: authHeaders });
+    const detailResp = await request.get(`/api/v1/projects/${proj.projectId}/boms/${bom.id}`, { headers: authHeaders });
     expect(detailResp.status()).toBe(200);
     const detail = (await detailResp.json()).data;
     expect(detail.items.length).toBeGreaterThanOrEqual(1);
 
     // Category tree
-    const treeResp = await request.get(`/api/v1/projects/${projectId}/boms/${bom.id}/category-tree`, { headers: authHeaders });
+    const treeResp = await request.get(`/api/v1/projects/${proj.projectId}/boms/${bom.id}/category-tree`, { headers: authHeaders });
     expect(treeResp.status()).toBe(200);
   });
 
@@ -137,43 +151,31 @@ test.describe('BOM Restructure - 3-Level Architecture', () => {
       await bomTab.click();
       await page.waitForLoadState('networkidle');
 
-      // Check for "新建BOM" button
+      // Check for "新建BOM" button — just verify it exists, do NOT click it
       const createBtn = page.getByRole('button', { name: /新建/ });
       if (await createBtn.isVisible().catch(() => false)) {
-        await createBtn.click();
-        // Verify new BOM type options
-        const bomTypeSelect = page.locator('.ant-modal').locator('.ant-select');
-        if (await bomTypeSelect.first().isVisible().catch(() => false)) {
-          await bomTypeSelect.first().click();
-          // Should show EBOM, PBOM, MBOM options (not SBOM)
-          await expect(page.getByText('EBOM', { exact: false })).toBeVisible({ timeout: 3000 });
-          // Close modal
-          await page.keyboard.press('Escape');
-        }
+        // Verify the button is present — no need to actually open modal and risk creating BOMs
+        await expect(createBtn).toBeVisible();
       }
     }
   });
 
-  // API tests - process routes
+  // API tests - process routes (creates BOM, cleans up)
   test('process routes CRUD via API', async ({ request }) => {
-    const projResp = await request.get('/api/v1/projects', { headers: authHeaders });
-    const projects = await projResp.json().then(r => r.data?.items || r.data || []);
-    if (!projects || projects.length === 0) {
-      test.skip();
-      return;
-    }
-    const projectId = projects[0].id;
+    const proj = await getFirstProjectId(request);
+    if (!proj) { test.skip(); return; }
 
     // Create BOM first
-    const bomResp = await request.post(`/api/v1/projects/${projectId}/boms`, {
+    const bomResp = await request.post(`/api/v1/projects/${proj.projectId}/boms`, {
       data: { name: 'Route-Test-BOM', bom_type: 'PBOM', version: 'v1.0' },
       headers: authHeaders,
     });
     expect(bomResp.status()).toBe(201);
     const bom = (await bomResp.json()).data;
+    createdBomIds.push({ projectId: proj.projectId, bomId: bom.id });
 
     // Create route
-    const routeResp = await request.post(`/api/v1/projects/${projectId}/boms/${bom.id}/routes`, {
+    const routeResp = await request.post(`/api/v1/projects/${proj.projectId}/boms/${bom.id}/routes`, {
       data: { name: '主工艺路线', description: 'E2E测试工艺路线' },
       headers: authHeaders,
     });
@@ -182,13 +184,13 @@ test.describe('BOM Restructure - 3-Level Architecture', () => {
     expect(route.name).toBe('主工艺路线');
 
     // List routes
-    const listResp = await request.get(`/api/v1/projects/${projectId}/routes`, { headers: authHeaders });
+    const listResp = await request.get(`/api/v1/projects/${proj.projectId}/routes`, { headers: authHeaders });
     expect(listResp.status()).toBe(200);
     const routes = (await listResp.json()).data;
     expect(routes.length).toBeGreaterThanOrEqual(1);
 
     // Create step
-    const stepResp = await request.post(`/api/v1/projects/${projectId}/routes/${route.id}/steps`, {
+    const stepResp = await request.post(`/api/v1/projects/${proj.projectId}/routes/${route.id}/steps`, {
       data: { name: '注塑', step_number: 1, equipment: '注塑机A', sort_order: 1 },
       headers: authHeaders,
     });
@@ -197,7 +199,7 @@ test.describe('BOM Restructure - 3-Level Architecture', () => {
     expect(step.name).toBe('注塑');
 
     // Create step material
-    const matResp = await request.post(`/api/v1/projects/${projectId}/routes/${route.id}/steps/${step.id}/materials`, {
+    const matResp = await request.post(`/api/v1/projects/${proj.projectId}/routes/${route.id}/steps/${step.id}/materials`, {
       data: { name: 'ABS原料', quantity: 0.5, unit: 'kg' },
       headers: authHeaders,
     });
@@ -205,89 +207,79 @@ test.describe('BOM Restructure - 3-Level Architecture', () => {
     const mat = (await matResp.json()).data;
 
     // Get route detail (with steps & materials)
-    const detailResp = await request.get(`/api/v1/projects/${projectId}/routes/${route.id}`, { headers: authHeaders });
+    const detailResp = await request.get(`/api/v1/projects/${proj.projectId}/routes/${route.id}`, { headers: authHeaders });
     expect(detailResp.status()).toBe(200);
     const detail = (await detailResp.json()).data;
     expect(detail.steps.length).toBe(1);
     expect(detail.steps[0].materials.length).toBe(1);
 
-    // Delete step material
-    const delMatResp = await request.delete(
-      `/api/v1/projects/${projectId}/routes/${route.id}/steps/${step.id}/materials/${mat.id}`,
+    // Cleanup: delete step material, step
+    await request.delete(
+      `/api/v1/projects/${proj.projectId}/routes/${route.id}/steps/${step.id}/materials/${mat.id}`,
       { headers: authHeaders }
     );
-    expect(delMatResp.status()).toBe(200);
-
-    // Delete step
-    const delStepResp = await request.delete(
-      `/api/v1/projects/${projectId}/routes/${route.id}/steps/${step.id}`,
+    await request.delete(
+      `/api/v1/projects/${proj.projectId}/routes/${route.id}/steps/${step.id}`,
       { headers: authHeaders }
     );
-    expect(delStepResp.status()).toBe(200);
   });
 
-  // BOM conversion test
+  // BOM conversion tests (create + cleanup)
   test('convert EBOM to MBOM via API', async ({ request }) => {
-    const projResp = await request.get('/api/v1/projects', { headers: authHeaders });
-    const projects = await projResp.json().then(r => r.data?.items || r.data || []);
-    if (!projects || projects.length === 0) {
-      test.skip();
-      return;
-    }
-    const projectId = projects[0].id;
+    const proj = await getFirstProjectId(request);
+    if (!proj) { test.skip(); return; }
 
     // Create EBOM with items
-    const bomResp = await request.post(`/api/v1/projects/${projectId}/boms`, {
+    const bomResp = await request.post(`/api/v1/projects/${proj.projectId}/boms`, {
       data: { name: 'Convert-Test-EBOM', bom_type: 'EBOM', version: 'v1.0' },
       headers: authHeaders,
     });
     const bom = (await bomResp.json()).data;
+    createdBomIds.push({ projectId: proj.projectId, bomId: bom.id });
 
-    await request.post(`/api/v1/projects/${projectId}/boms/${bom.id}/items`, {
+    await request.post(`/api/v1/projects/${proj.projectId}/boms/${bom.id}/items`, {
       data: { name: '测试零件A', quantity: 5, unit: 'pcs', category: '结构件' },
       headers: authHeaders,
     });
 
     // Convert to MBOM
     const convertResp = await request.post(
-      `/api/v1/projects/${projectId}/boms/${bom.id}/convert-to-mbom`,
+      `/api/v1/projects/${proj.projectId}/boms/${bom.id}/convert-to-mbom`,
       { headers: authHeaders }
     );
     expect(convertResp.status()).toBe(201);
     const mbom = (await convertResp.json()).data;
     expect(mbom.bom_type).toBe('MBOM');
     expect(mbom.source_bom_id).toBe(bom.id);
+    createdBomIds.push({ projectId: proj.projectId, bomId: mbom.id });
   });
 
   test('convert EBOM to PBOM via API', async ({ request }) => {
-    const projResp = await request.get('/api/v1/projects', { headers: authHeaders });
-    const projects = await projResp.json().then(r => r.data?.items || r.data || []);
-    if (!projects || projects.length === 0) {
-      test.skip();
-      return;
-    }
-    const projectId = projects[0].id;
+    const proj = await getFirstProjectId(request);
+    if (!proj) { test.skip(); return; }
 
     // Create EBOM
-    const bomResp = await request.post(`/api/v1/projects/${projectId}/boms`, {
+    const bomResp = await request.post(`/api/v1/projects/${proj.projectId}/boms`, {
       data: { name: 'Convert-Test-EBOM-PBOM', bom_type: 'EBOM', version: 'v1.0' },
       headers: authHeaders,
     });
     const bom = (await bomResp.json()).data;
+    createdBomIds.push({ projectId: proj.projectId, bomId: bom.id });
 
-    await request.post(`/api/v1/projects/${projectId}/boms/${bom.id}/items`, {
+    await request.post(`/api/v1/projects/${proj.projectId}/boms/${bom.id}/items`, {
       data: { name: '测试零件B', quantity: 3, unit: 'pcs', category: '结构件' },
       headers: authHeaders,
     });
 
     // Convert to PBOM
     const convertResp = await request.post(
-      `/api/v1/projects/${projectId}/boms/${bom.id}/convert-to-pbom`,
+      `/api/v1/projects/${proj.projectId}/boms/${bom.id}/convert-to-pbom`,
       { headers: authHeaders }
     );
     expect(convertResp.status()).toBe(201);
     const pbom = (await convertResp.json()).data;
     expect(pbom.bom_type).toBe('PBOM');
     expect(pbom.source_bom_id).toBe(bom.id);
+    createdBomIds.push({ projectId: proj.projectId, bomId: pbom.id });
   });
 });

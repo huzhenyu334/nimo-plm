@@ -1245,6 +1245,7 @@ func registerRoutes(r *gin.Engine, h *handler.Handlers, svc *service.Services, c
 				projects.POST("/:id/boms", h.ProjectBOM.CreateBOM)
 				projects.GET("/:id/boms/:bomId", h.ProjectBOM.GetBOM)
 				projects.PUT("/:id/boms/:bomId", h.ProjectBOM.UpdateBOM)
+				projects.DELETE("/:id/boms/:bomId", h.ProjectBOM.DeleteBOM)
 				projects.POST("/:id/boms/:bomId/submit", h.ProjectBOM.SubmitBOM)
 				projects.POST("/:id/boms/:bomId/approve", h.ProjectBOM.ApproveBOM)
 				projects.POST("/:id/boms/:bomId/reject", h.ProjectBOM.RejectBOM)
