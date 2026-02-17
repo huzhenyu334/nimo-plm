@@ -41,8 +41,8 @@ export interface DocumentVersion {
   version: string;
   file_name: string;
   file_size: number;
-  storage_path: string;
-  change_notes: string;
+  file_path: string;
+  change_summary: string;
   created_by: string;
   created_at: string;
   creator?: User;
@@ -130,15 +130,15 @@ export const documentsApi = {
     return response.data.data;
   },
 
-  listVersions: async (id: string): Promise<{ versions: DocumentVersion[] }> => {
-    const response = await apiClient.get<ApiResponse<{ versions: DocumentVersion[] }>>(`/documents/${id}/versions`);
+  listVersions: async (id: string): Promise<DocumentVersion[]> => {
+    const response = await apiClient.get<ApiResponse<DocumentVersion[]>>(`/documents/${id}/versions`);
     return response.data.data;
   },
 
-  uploadNewVersion: async (id: string, file: File, changeNotes?: string): Promise<DocumentVersion> => {
+  uploadNewVersion: async (id: string, file: File, changeSummary?: string): Promise<Document> => {
     const formData = new FormData();
     formData.append('file', file);
-    if (changeNotes) formData.append('change_notes', changeNotes);
+    if (changeSummary) formData.append('change_summary', changeSummary);
     
     const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/v1/documents/${id}/versions`, {
       method: 'POST',

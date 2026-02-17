@@ -30,6 +30,7 @@ import {
   FileImageOutlined,
   FileZipOutlined,
   HistoryOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
 import { documentsApi, Document, DocumentCategory, DocumentVersion } from '@/api';
 
@@ -45,10 +46,14 @@ const Documents: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [detailVisible, setDetailVisible] = useState(false);
   const [versionsVisible, setVersionsVisible] = useState(false);
+  const [versionUploadVisible, setVersionUploadVisible] = useState(false);
   const [currentDocument, setCurrentDocument] = useState<Document | null>(null);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [versionFile, setVersionFile] = useState<File | null>(null);
+  const [versionUploading, setVersionUploading] = useState(false);
   const [form] = Form.useForm();
+  const [versionForm] = Form.useForm();
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
 
   const fetchDocuments = async (page = 1) => {
@@ -102,7 +107,7 @@ const Documents: React.FC = () => {
   const handleViewVersions = async (record: Document) => {
     try {
       const res = await documentsApi.listVersions(record.id);
-      setVersions(res.versions || []);
+      setVersions(res || []);
       setCurrentDocument(record);
       setVersionsVisible(true);
     } catch (error) {
@@ -167,6 +172,57 @@ const Documents: React.FC = () => {
     }
   };
 
+  const handleUploadNewVersion = () => {
+    versionForm.resetFields();
+    setVersionFile(null);
+    setVersionUploadVisible(true);
+  };
+
+  const handleVersionSubmit = async () => {
+    if (!currentDocument) return;
+    if (!versionFile) {
+      message.warning('请选择文件');
+      return;
+    }
+    setVersionUploading(true);
+    try {
+      const values = await versionForm.validateFields();
+      await documentsApi.uploadNewVersion(currentDocument.id, versionFile, values.change_summary);
+      message.success('新版本上传成功');
+      setVersionUploadVisible(false);
+      // Refresh versions list
+      const res = await documentsApi.listVersions(currentDocument.id);
+      setVersions(res || []);
+      // Refresh document list to update version number
+      fetchDocuments(pagination.current);
+      // Update currentDocument version
+      const updatedDoc = await documentsApi.get(currentDocument.id);
+      setCurrentDocument(updatedDoc);
+    } catch (error) {
+      console.error('上传新版本失败:', error);
+      message.error('上传新版本失败');
+    } finally {
+      setVersionUploading(false);
+    }
+  };
+
+  const handleDownloadVersion = async (versionItem: DocumentVersion) => {
+    if (!currentDocument) return;
+    try {
+      const blob = await documentsApi.downloadVersion(currentDocument.id, versionItem.id);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = versionItem.file_name;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      message.error('下载失败');
+    }
+  };
+
   const getFileIcon = (fileType: string) => {
     if (fileType?.includes('pdf')) return <FilePdfOutlined style={{ color: '#ff4d4f', fontSize: 20 }} />;
     if (fileType?.includes('word') || fileType?.includes('doc')) return <FileWordOutlined style={{ color: '#1890ff', fontSize: 20 }} />;
@@ -226,6 +282,7 @@ const Documents: React.FC = () => {
       dataIndex: 'version',
       key: 'version',
       width: 70,
+      render: (v: string) => <Tag color="blue">V{v}</Tag>,
     },
     {
       title: '大小',
@@ -272,7 +329,7 @@ const Documents: React.FC = () => {
               onClick={() => handleDownload(record.id, record.file_name)}
             />
           </Tooltip>
-          <Tooltip title="版本">
+          <Tooltip title="版本历史">
             <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => handleViewVersions(record)} />
           </Tooltip>
           {record.status === 'draft' && (
@@ -394,13 +451,26 @@ const Documents: React.FC = () => {
         onClose={() => setDetailVisible(false)}
         width={500}
         extra={
-          <Button
-            type="primary"
-            icon={<DownloadOutlined />}
-            onClick={() => currentDocument && handleDownload(currentDocument.id, currentDocument.file_name)}
-          >
-            下载
-          </Button>
+          <Space>
+            <Button
+              icon={<HistoryOutlined />}
+              onClick={() => {
+                if (currentDocument) {
+                  setDetailVisible(false);
+                  handleViewVersions(currentDocument);
+                }
+              }}
+            >
+              版本历史
+            </Button>
+            <Button
+              type="primary"
+              icon={<DownloadOutlined />}
+              onClick={() => currentDocument && handleDownload(currentDocument.id, currentDocument.file_name)}
+            >
+              下载
+            </Button>
+          </Space>
         }
       >
         {currentDocument && (
@@ -410,7 +480,7 @@ const Documents: React.FC = () => {
             <Descriptions.Item label="分类">{currentDocument.category?.name || '-'}</Descriptions.Item>
             <Descriptions.Item label="文件名">{currentDocument.file_name}</Descriptions.Item>
             <Descriptions.Item label="文件大小">{formatFileSize(currentDocument.file_size)}</Descriptions.Item>
-            <Descriptions.Item label="版本">{currentDocument.version}</Descriptions.Item>
+            <Descriptions.Item label="版本"><Tag color="blue">V{currentDocument.version}</Tag></Descriptions.Item>
             <Descriptions.Item label="状态">{getStatusTag(currentDocument.status)}</Descriptions.Item>
             <Descriptions.Item label="描述">{currentDocument.description || '-'}</Descriptions.Item>
             <Descriptions.Item label="上传人">{currentDocument.uploader?.name || '-'}</Descriptions.Item>
@@ -435,45 +505,82 @@ const Documents: React.FC = () => {
         open={versionsVisible}
         onClose={() => setVersionsVisible(false)}
         width={600}
+        extra={
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleUploadNewVersion}>
+            上传新版本
+          </Button>
+        }
       >
         <List
           dataSource={versions}
-          renderItem={(item) => (
-            <List.Item
-              actions={[
-                <Button
-                  type="link"
-                  icon={<DownloadOutlined />}
-                  onClick={() => documentsApi.downloadVersion(currentDocument!.id, item.id).then((blob) => {
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = item.file_name;
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                  })}
-                >
-                  下载
-                </Button>,
-              ]}
-            >
-              <List.Item.Meta
-                avatar={getFileIcon(item.file_name)}
-                title={`版本 ${item.version}`}
-                description={
-                  <div>
-                    <div>{item.file_name} ({formatFileSize(item.file_size)})</div>
-                    <div style={{ color: '#999' }}>
-                      {item.creator?.name || '未知'} · {new Date(item.created_at).toLocaleString()}
+          renderItem={(item) => {
+            const isCurrent = item.version === currentDocument?.version;
+            return (
+              <List.Item
+                style={isCurrent ? { backgroundColor: '#e6f7ff', borderRadius: 6, padding: '12px 16px' } : { padding: '12px 16px' }}
+                actions={[
+                  <Button
+                    key="download"
+                    type="link"
+                    icon={<DownloadOutlined />}
+                    onClick={() => handleDownloadVersion(item)}
+                  >
+                    下载
+                  </Button>,
+                ]}
+              >
+                <List.Item.Meta
+                  avatar={getFileIcon(item.file_name)}
+                  title={
+                    <Space>
+                      <span>V{item.version}</span>
+                      {isCurrent && <Tag color="blue">当前版本</Tag>}
+                    </Space>
+                  }
+                  description={
+                    <div>
+                      <div>{item.file_name} ({formatFileSize(item.file_size)})</div>
+                      <div style={{ color: '#999' }}>
+                        {item.creator?.name || '未知'} · {new Date(item.created_at).toLocaleString()}
+                      </div>
+                      {item.change_summary && <div style={{ marginTop: 4, color: '#666' }}>变更说明: {item.change_summary}</div>}
                     </div>
-                    {item.change_notes && <div style={{ marginTop: 4 }}>{item.change_notes}</div>}
-                  </div>
-                }
-              />
-            </List.Item>
-          )}
+                  }
+                />
+              </List.Item>
+            );
+          }}
         />
       </Drawer>
+
+      {/* 上传新版本弹窗 */}
+      <Modal
+        title="上传新版本"
+        open={versionUploadVisible}
+        onOk={handleVersionSubmit}
+        onCancel={() => setVersionUploadVisible(false)}
+        confirmLoading={versionUploading}
+        width={500}
+      >
+        <Form form={versionForm} layout="vertical">
+          <Form.Item label="选择文件" required>
+            <Upload
+              beforeUpload={(file) => {
+                setVersionFile(file);
+                return false;
+              }}
+              maxCount={1}
+              onRemove={() => setVersionFile(null)}
+            >
+              <Button icon={<UploadOutlined />}>选择文件</Button>
+            </Upload>
+            {versionFile && <div style={{ marginTop: 8 }}>{versionFile.name}</div>}
+          </Form.Item>
+          <Form.Item name="change_summary" label="变更说明">
+            <Input.TextArea rows={3} placeholder="请输入本次变更说明（可选）" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

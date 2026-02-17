@@ -25,6 +25,7 @@ import {
   PartitionOutlined,
   DatabaseOutlined,
   InboxOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
 import { Dropdown, Avatar, Space, Spin } from 'antd';
 import { useAuth } from '@/contexts/AuthContext';
@@ -42,6 +43,7 @@ const pageTitles: Record<string, string> = {
   '/roles': '角色管理',
   '/bom-management': 'BOM管理',
   '/bom-ecn': 'BOM ECN管理',
+  '/documents': '文档管理',
   '/ecn': 'ECN变更管理',
   '/srm': 'SRM采购管理',
   '/srm/suppliers': '供应商',
@@ -130,6 +132,7 @@ const MainLayout: React.FC = () => {
       { path: '/materials', name: '物料选型库', icon: <ExperimentOutlined /> },
       { path: '/templates', name: '流程管理', icon: <SnippetsOutlined /> },
       { path: '/approvals', name: '审批管理', icon: <AuditOutlined /> },
+      { path: '/documents', name: '文档管理', icon: <FolderOpenOutlined /> },
       { path: '/ecn', name: 'ECN变更管理', icon: <SwapOutlined /> },
       { path: '/roles', name: '角色管理', icon: <TeamOutlined /> },
       {
