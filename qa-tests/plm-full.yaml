@@ -1,0 +1,247 @@
+name: PLM/SRM Full Page Smoke Test
+baseUrl: http://43.134.86.237:8080
+
+tests:
+  # ===== PLM 模块 =====
+
+  - name: 工作台 - 页面加载
+    steps:
+      - goto: /dashboard
+      - waitMs: 3000
+      - expectVisible: 工作台
+
+  - name: 工作台 - 无 console 错误
+    steps:
+      - goto: /dashboard
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: 我的任务 - 页面加载
+    steps:
+      - goto: /my-tasks
+      - waitMs: 3000
+      - expectVisible: 我的任务
+
+  - name: 我的任务 - 无 console 错误
+    steps:
+      - goto: /my-tasks
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: 项目管理 - 页面加载
+    steps:
+      - goto: /projects
+      - waitMs: 3000
+      - expectVisible: 项目管理
+
+  - name: 项目管理 - 无 console 错误
+    steps:
+      - goto: /projects
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: BOM管理 - 页面加载
+    steps:
+      - goto: /bom-management
+      - waitMs: 3000
+      - expectVisible: BOM管理
+
+  - name: BOM管理 - 无 console 错误
+    steps:
+      - goto: /bom-management
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: ECN变更管理 - 页面加载
+    steps:
+      - goto: /ecn
+      - waitMs: 3000
+      - expectVisible: ECN
+
+  - name: ECN变更管理 - 无 console 错误
+    steps:
+      - goto: /ecn
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: 物料选型库 - 页面加载
+    steps:
+      - goto: /materials
+      - waitMs: 3000
+      - expectVisible: 物料
+
+  - name: 物料选型库 - 无 console 错误
+    steps:
+      - goto: /materials
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: 流程管理 - 页面加载
+    steps:
+      - goto: /templates
+      - waitMs: 3000
+      - expectVisible: 流程
+
+  - name: 流程管理 - 无 console 错误
+    steps:
+      - goto: /templates
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: 审批管理 - 页面加载
+    steps:
+      - goto: /approvals
+      - waitMs: 3000
+      - expectVisible: 审批
+
+  - name: 审批管理 - 无 console 错误
+    steps:
+      - goto: /approvals
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: 文档管理 - 页面加载
+    steps:
+      - goto: /documents
+      - waitMs: 3000
+      - expectVisible: 文档
+
+  - name: 文档管理 - 无 console 错误
+    steps:
+      - goto: /documents
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: 角色管理 - 页面加载
+    steps:
+      - goto: /roles
+      - waitMs: 3000
+      - expectVisible: 角色
+
+  - name: 角色管理 - 无 console 错误
+    steps:
+      - goto: /roles
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  # ===== SRM 模块 =====
+
+  - name: SRM采购总览 - 页面加载
+    steps:
+      - goto: /srm
+      - waitMs: 3000
+      - expectVisible: 采购
+
+  - name: SRM采购总览 - 无 console 错误
+    steps:
+      - goto: /srm
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: SRM供应商 - 页面加载
+    steps:
+      - goto: /srm/suppliers
+      - waitMs: 3000
+      - expectVisible: 供应商
+
+  - name: SRM供应商 - 无 console 错误
+    steps:
+      - goto: /srm/suppliers
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: SRM采购需求 - 页面加载
+    steps:
+      - goto: /srm/purchase-requests
+      - waitMs: 3000
+      - expectVisible: 采购
+
+  - name: SRM采购需求 - 无 console 错误
+    steps:
+      - goto: /srm/purchase-requests
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: SRM采购订单 - 页面加载
+    steps:
+      - goto: /srm/purchase-orders
+      - waitMs: 3000
+      - expectVisible: 采购订单
+
+  - name: SRM采购订单 - 无 console 错误
+    steps:
+      - goto: /srm/purchase-orders
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: SRM来料检验 - 页面加载
+    steps:
+      - goto: /srm/inspections
+      - waitMs: 3000
+      - expectVisible: 检验
+
+  - name: SRM来料检验 - 无 console 错误
+    steps:
+      - goto: /srm/inspections
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: SRM库存管理 - 页面加载
+    steps:
+      - goto: /srm/inventory
+      - waitMs: 3000
+      - expectVisible: 库存
+
+  - name: SRM库存管理 - 无 console 错误
+    steps:
+      - goto: /srm/inventory
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: SRM对账结算 - 页面加载
+    steps:
+      - goto: /srm/settlements
+      - waitMs: 3000
+      - expectVisible: 对账
+
+  - name: SRM对账结算 - 无 console 错误
+    steps:
+      - goto: /srm/settlements
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: SRM 8D改进 - 页面加载
+    steps:
+      - goto: /srm/corrective-actions
+      - waitMs: 3000
+      - expectVisible: 8D
+
+  - name: SRM 8D改进 - 无 console 错误
+    steps:
+      - goto: /srm/corrective-actions
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: SRM供应商评价 - 页面加载
+    steps:
+      - goto: /srm/evaluations
+      - waitMs: 3000
+      - expectVisible: 评价
+
+  - name: SRM供应商评价 - 无 console 错误
+    steps:
+      - goto: /srm/evaluations
+      - waitMs: 3000
+      - expectNoErrors: true
+
+  - name: SRM通用设备 - 页面加载
+    steps:
+      - goto: /srm/equipment
+      - waitMs: 3000
+      - expectVisible: 设备
+
+  - name: SRM通用设备 - 无 console 错误
+    steps:
+      - goto: /srm/equipment
+      - waitMs: 3000
+      - expectNoErrors: true
