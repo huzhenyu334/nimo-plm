@@ -1,0 +1,11 @@
+{
+  "owner": "henrino3",
+  "slug": "ec-task-orchestrator",
+  "displayName": "Task Orchestrator",
+  "latest": {
+    "version": "1.0.0",
+    "publishedAt": 1770464672016,
+    "commit": "https://github.com/openclaw/skills/commit/0235bdc8855875acacc8ca30e0a63f7a8934e663"
+  },
+  "history": []
+}

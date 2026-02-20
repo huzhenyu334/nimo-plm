@@ -14,8 +14,8 @@ import {
   Drawer,
   Descriptions,
   Popconfirm,
-  message,
   InputNumber,
+  App,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -47,6 +47,7 @@ const disputeTypeOptions = [
 ];
 
 export default function Settlements() {
+  const { message: messageApi, modal } = App.useApp();
   const queryClient = useQueryClient();
   const [filterSupplier, setFilterSupplier] = useState<string>();
   const [filterStatus, setFilterStatus] = useState<string>();
@@ -65,6 +66,7 @@ export default function Settlements() {
   const { data: suppliers } = useQuery({
     queryKey: ['srm-suppliers-all'],
     queryFn: () => srmApi.listSuppliers({ page_size: 100 }),
+    staleTime: 60_000,
   });
 
   // 对账单列表
@@ -77,6 +79,7 @@ export default function Settlements() {
         page,
         page_size: pageSize,
       }),
+    staleTime: 30_000,
   });
 
   // 对账单详情
@@ -84,81 +87,82 @@ export default function Settlements() {
     queryKey: ['srm-settlement', currentSettlement?.id],
     queryFn: () => srmApi.getSettlement(currentSettlement!.id),
     enabled: !!currentSettlement?.id && drawerVisible,
+    staleTime: 60_000,
   });
 
   const createMutation = useMutation({
     mutationFn: (values: { supplier_id: string; period_start?: string; period_end?: string; notes?: string }) =>
       srmApi.createSettlement(values),
     onSuccess: () => {
-      message.success('对账单创建成功');
+      messageApi.success('对账单创建成功');
       setCreateVisible(false);
       form.resetFields();
       queryClient.invalidateQueries({ queryKey: ['srm-settlements'] });
     },
-    onError: () => message.error('创建失败'),
+    onError: () => messageApi.error('创建失败'),
   });
 
   const generateMutation = useMutation({
     mutationFn: (values: { supplier_id: string; period_start: string; period_end: string }) =>
       srmApi.generateSettlement(values),
     onSuccess: () => {
-      message.success('对账单生成成功');
+      messageApi.success('对账单生成成功');
       setGenerateVisible(false);
       genForm.resetFields();
       queryClient.invalidateQueries({ queryKey: ['srm-settlements'] });
     },
-    onError: () => message.error('生成失败'),
+    onError: () => messageApi.error('生成失败'),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => srmApi.deleteSettlement(id),
     onSuccess: () => {
-      message.success('已删除');
+      messageApi.success('已删除');
       queryClient.invalidateQueries({ queryKey: ['srm-settlements'] });
     },
-    onError: () => message.error('删除失败'),
+    onError: () => messageApi.error('删除失败'),
   });
 
   const confirmBuyerMutation = useMutation({
     mutationFn: (id: string) => srmApi.confirmSettlementBuyer(id),
     onSuccess: () => {
-      message.success('采购方已确认');
+      messageApi.success('采购方已确认');
       refetchDetail();
       queryClient.invalidateQueries({ queryKey: ['srm-settlements'] });
     },
-    onError: () => message.error('确认失败'),
+    onError: () => messageApi.error('确认失败'),
   });
 
   const confirmSupplierMutation = useMutation({
     mutationFn: (id: string) => srmApi.confirmSettlementSupplier(id),
     onSuccess: () => {
-      message.success('供应商已确认');
+      messageApi.success('供应商已确认');
       refetchDetail();
       queryClient.invalidateQueries({ queryKey: ['srm-settlements'] });
     },
-    onError: () => message.error('确认失败'),
+    onError: () => messageApi.error('确认失败'),
   });
 
   const addDisputeMutation = useMutation({
     mutationFn: (values: { dispute_type: string; description?: string; amount_diff?: number }) =>
       srmApi.addSettlementDispute(currentSettlement!.id, values),
     onSuccess: () => {
-      message.success('差异记录已添加');
+      messageApi.success('差异记录已添加');
       setDisputeVisible(false);
       disputeForm.resetFields();
       refetchDetail();
     },
-    onError: () => message.error('添加失败'),
+    onError: () => messageApi.error('添加失败'),
   });
 
   const resolveDisputeMutation = useMutation({
     mutationFn: ({ disputeId, resolution }: { disputeId: string; resolution: string }) =>
       srmApi.updateSettlementDispute(currentSettlement!.id, disputeId, { status: 'resolved', resolution }),
     onSuccess: () => {
-      message.success('差异已解决');
+      messageApi.success('差异已解决');
       refetchDetail();
     },
-    onError: () => message.error('操作失败'),
+    onError: () => messageApi.error('操作失败'),
   });
 
   const supplierOptions = (suppliers?.items || []).map((s: { id: string; name: string }) => ({
@@ -313,7 +317,7 @@ export default function Settlements() {
             type="link"
             size="small"
             onClick={() => {
-              Modal.confirm({
+              modal.confirm({
                 title: '解决差异',
                 content: (
                   <Input.TextArea

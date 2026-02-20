@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ACP 设计预览</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/antd/5.12.8/reset.min.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #141414; color: #ffffffd9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  
+  /* ── 导航 ── */
+  .nav { background: #1f1f1f; padding: 0 24px; height: 56px; display: flex; align-items: center; border-bottom: 1px solid #303030; }
+  .nav-logo { font-size: 18px; font-weight: 600; color: #1677ff; display: flex; align-items: center; gap: 8px; }
+  .nav-links { margin-left: 40px; display: flex; gap: 24px; }
+  .nav-links a { color: #ffffffa6; text-decoration: none; font-size: 14px; padding: 16px 0; border-bottom: 2px solid transparent; }
+  .nav-links a.active { color: #1677ff; border-bottom-color: #1677ff; }
+  
+  /* ── 内容区 ── */
+  .content { padding: 24px; max-width: 1440px; margin: 0 auto; }
+  .page-title { font-size: 20px; font-weight: 600; margin-bottom: 24px; }
+  
+  /* ── 统计栏 ── */
+  .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: #1f1f1f; border-radius: 8px; padding: 20px; position: relative; }
+  .stat-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 8px 0 0 8px; }
+  .stat-card.green::before { background: #52c41a; }
+  .stat-card.blue::before { background: #1677ff; }
+  .stat-card.yellow::before { background: #faad14; }
+  .stat-title { font-size: 14px; color: #ffffff73; margin-bottom: 8px; }
+  .stat-value { font-size: 28px; font-weight: 600; }
+  
+  /* ── Agent 卡片 ── */
+  .agent-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .agent-card { background: #1f1f1f; border-radius: 8px; padding: 20px; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px; }
+  .agent-card:hover { background: #262626; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  .agent-card.offline { opacity: 0.55; }
+  .agent-row { display: flex; justify-content: space-between; align-items: center; }
+  .agent-name { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .agent-name .icon { font-size: 18px; }
+  .role-tag { padding: 1px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+  .role-coo { background: rgba(114,46,209,0.15); color: #b37feb; border: 1px solid rgba(114,46,209,0.3); }
+  .role-pm { background: rgba(22,119,255,0.15); color: #69b1ff; border: 1px solid rgba(22,119,255,0.3); }
+  .role-ux { background: rgba(250,140,22,0.15); color: #ffc069; border: 1px solid rgba(250,140,22,0.3); }
+  .role-dev { background: rgba(82,196,26,0.15); color: #95de64; border: 1px solid rgba(82,196,26,0.3); }
+  .status-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .status-dot.online { background: #52c41a; box-shadow: 0 0 6px #52c41a; }
+  .status-dot.working { background: #1677ff; box-shadow: 0 0 6px #1677ff; animation: pulse 1.5s infinite; }
+  .status-dot.error { background: #ff4d4f; }
+  .status-dot.offline { background: #434343; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .model-text { font-size: 12px; color: #ffffff73; }
+  .action-box { background: rgba(255,255,255,0.04); border-radius: 6px; padding: 8px 12px; font-size: 13px; min-height: 36px; }
+  .action-icon { color: #1677ff; margin-right: 4px; }
+  .token-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .token-bar { width: 80px; height: 4px; background: #303030; border-radius: 2px; overflow: hidden; }
+  .token-bar-fill { height: 100%; background: #1677ff; border-radius: 2px; }
+  .time-text { color: #ffffff45; }
+  
+  /* ── 详情页 ── */
+  .detail-layout { display: flex; gap: 16px; height: calc(100vh - 120px); }
+  .chat-panel { flex: 6; background: #1f1f1f; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
+  .chat-header { padding: 16px 20px; border-bottom: 1px solid #303030; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .chat-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+  .sidebar-panel { flex: 4; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+  .sidebar-card { background: #1f1f1f; border-radius: 8px; padding: 16px; }
+  .sidebar-card-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #ffffffa6; }
+  .info-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #ffffff0a; font-size: 13px; }
+  .info-label { color: #ffffff73; }
+  .code { background: #141414; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 12px; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .mini-stat-title { font-size: 12px; color: #ffffff73; }
+  .mini-stat-value { font-size: 18px; font-weight: 600; margin-top: 2px; }
+  
+  /* 消息气泡 */
+  .msg { margin-bottom: 16px; }
+  .msg-meta { margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .msg-tag { padding: 1px 8px; border-radius: 4px; font-size: 12px; }
+  .msg-tag.user { background: rgba(82,196,26,0.15); color: #95de64; }
+  .msg-tag.assistant { background: rgba(22,119,255,0.15); color: #69b1ff; }
+  .msg-tag.system { background: rgba(250,173,20,0.15); color: #ffc069; }
+  .msg-time { font-size: 12px; color: #ffffff45; }
+  .msg-bubble { max-width: 85%; border-radius: 8px; padding: 10px 14px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .msg-bubble.user { background: rgba(22,119,255,0.12); border: 1px solid rgba(22,119,255,0.2); margin-left: auto; }
+  .msg-bubble.assistant { background: #262626; border: 1px solid #303030; }
+  .msg.user { text-align: right; }
+  .msg.user .msg-meta { justify-content: flex-end; }
+  .tool-call { margin-top: 8px; max-width: 85%; background: #1a1a1a; border: 1px solid #303030; border-radius: 6px; padding: 8px 12px; font-size: 12px; }
+  .tool-name { color: #1677ff; font-family: monospace; }
+  .tool-params { color: #ffffff73; margin-left: 8px; }
+  
+  /* 输入框 */
+  .send-area textarea { width: 100%; background: #141414; border: 1px solid #303030; border-radius: 8px; padding: 10px 14px; color: #ffffffd9; font-size: 14px; resize: none; outline: none; }
+  .send-area textarea:focus { border-color: #1677ff; }
+  .send-btn { width: 100%; margin-top: 8px; padding: 8px; background: #1677ff; color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+  .send-btn:hover { background: #4096ff; }
+  
+  /* ── 登录页 ── */
+  .login-wrapper { min-height: 100vh; display: flex; justify-content: center; align-items: center; background: #141414; }
+  .login-card { width: 380px; background: #1f1f1f; border-radius: 12px; padding: 32px; }
+  .login-logo { text-align: center; margin-bottom: 32px; }
+  .login-logo .icon { font-size: 40px; color: #1677ff; margin-bottom: 8px; }
+  .login-logo h2 { font-size: 22px; font-weight: 600; margin: 8px 0 4px; }
+  .login-logo p { color: #ffffff73; font-size: 14px; }
+  .login-input { width: 100%; padding: 12px 14px; background: #141414; border: 1px solid #303030; border-radius: 8px; color: #ffffffd9; font-size: 14px; outline: none; }
+  .login-input:focus { border-color: #1677ff; }
+  .login-btn { width: 100%; margin-top: 16px; padding: 10px; background: #1677ff; color: #fff; border: none; border-radius: 8px; font-size: 15px; cursor: pointer; }
+  .login-footer { text-align: center; margin-top: 24px; font-size: 12px; color: #ffffff45; }
+
+  /* Tab nav */
+  .preview-tabs { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; background: #1f1f1f; padding: 8px; border-radius: 12px; border: 1px solid #303030; z-index: 100; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+  .preview-tabs button { padding: 8px 16px; background: transparent; border: 1px solid #303030; border-radius: 8px; color: #ffffffa6; cursor: pointer; font-size: 13px; }
+  .preview-tabs button.active { background: #1677ff; border-color: #1677ff; color: #fff; }
+  .page { display: none; }
+  .page.active { display: block; }
+</style>
+</head>
+<body>
+
+<!-- ============ PAGE 1: Dashboard ============ -->
+<div id="page-dashboard" class="page">
+  <nav class="nav">
+    <div class="nav-logo">🤖 Agent Control Panel</div>
+    <div class="nav-links">
+      <a class="active">监控面板</a>
+      <a>任务管理</a>
+      <a>工作流</a>
+      <a>设置</a>
+    </div>
+  </nav>
+  <div class="content">
+    <div class="page-title">Agent 监控面板</div>
+    <div class="stats-row">
+      <div class="stat-card green"><div class="stat-title">🤖 在线 Agent</div><div class="stat-value">3</div></div>
+      <div class="stat-card blue"><div class="stat-title">✅ 今日任务完成</div><div class="stat-value">12</div></div>
+      <div class="stat-card yellow"><div class="stat-title">⚡ 活跃工作流</div><div class="stat-value">2</div></div>
+    </div>
+    <div class="agent-grid">
+      <!-- Lyra -->
+      <div class="agent-card" onclick="showPage('detail')">
+        <div class="agent-row">
+          <div class="agent-name"><span class="icon" style="color:#1677ff">🤖</span> Lyra <span class="role-tag role-coo">COO</span></div>
+          <div class="status-badge"><span class="status-dot working"></span><span style="color:#1677ff">工作中</span></div>
+        </div>
+        <div class="model-text">⚡ Opus 4.6</div>
+        <div class="action-box"><span class="action-icon">⚡</span> exec: go build -o bin/acp ./cmd/acp/</div>
+        <div class="token-row">
+          <span style="display:flex;align-items:center;gap:6px;color:#ffffff73">Token <span class="token-bar"><span class="token-bar-fill" style="width:62%"></span></span> 124.8k</span>
+          <span class="time-text">🕐 刚刚</span>
+        </div>
+      </div>
+      <!-- PM -->
+      <div class="agent-card">
+        <div class="agent-row">
+          <div class="agent-name"><span class="icon" style="color:#52c41a">🤖</span> PM <span class="role-tag role-pm">PM</span></div>
+          <div class="status-badge"><span class="status-dot online"></span><span style="color:#52c41a">在线</span></div>
+        </div>
+        <div class="model-text">⚡ Opus 4.6</div>
+        <div class="action-box" style="color:#ffffff73">暂无操作</div>
+        <div class="token-row">
+          <span style="display:flex;align-items:center;gap:6px;color:#ffffff73">Token <span class="token-bar"><span class="token-bar-fill" style="width:35%"></span></span> 71.2k</span>
+          <span class="time-text">🕐 15分钟前</span>
+        </div>
+      </div>
+      <!-- UX -->
+      <div class="agent-card">
+        <div class="agent-row">
+          <div class="agent-name"><span class="icon" style="color:#52c41a">🤖</span> UX <span class="role-tag role-ux">UX</span></div>
+          <div class="status-badge"><span class="status-dot online"></span><span style="color:#52c41a">在线</span></div>
+        </div>
+        <div class="model-text">⚡ Opus 4.6</div>
+        <div class="action-box" style="color:#ffffff73">暂无操作</div>
+        <div class="token-row">
+          <span style="display:flex;align-items:center;gap:6px;color:#ffffff73">Token <span class="token-bar"><span class="token-bar-fill" style="width:22%"></span></span> 43.6k</span>
+          <span class="time-text">🕐 20分钟前</span>
+        </div>
+      </div>
+      <!-- Alice (offline) -->
+      <div class="agent-card offline">
+        <div class="agent-row">
+          <div class="agent-name"><span class="icon">🤖</span> Alice <span class="role-tag role-dev">Dev</span></div>
+          <div class="status-badge"><span class="status-dot offline"></span><span style="color:#434343">离线</span></div>
+        </div>
+        <div class="model-text">⚡ GLM-5</div>
+        <div class="action-box" style="color:#ffffff73">暂无操作</div>
+        <div class="token-row">
+          <span style="display:flex;align-items:center;gap:6px;color:#ffffff73">Token <span class="token-bar"><span class="token-bar-fill" style="width:0%"></span></span> 0</span>
+          <span class="time-text">🕐 2小时前</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PAGE 2: Agent Detail ============ -->
+<div id="page-detail" class="page active">
+  <nav class="nav">
+    <div class="nav-logo">🤖 Agent Control Panel</div>
+    <div class="nav-links">
+      <a onclick="showPage('dashboard')" style="cursor:pointer">← 返回监控面板</a>
+    </div>
+  </nav>
+  <div class="content" style="height:calc(100vh - 56px);padding-bottom:0">
+    <div class="detail-layout">
+      <!-- 左侧对话 -->
+      <div class="chat-panel">
+        <div class="chat-header">🤖 Lyra <span class="status-dot working" style="margin-left:8px"></span> <span style="font-size:12px;color:#ffffff73;font-weight:400;margin-left:8px">对话历史</span></div>
+        <div class="chat-body">
+          <div class="msg user">
+            <div class="msg-meta"><span class="msg-time">02:00:05</span><span class="msg-tag user">👤 User</span></div>
+            <div class="msg-bubble user">把Antfarm跑起来，先让agent能7*24小时工作</div>
+          </div>
+          <div class="msg assistant">
+            <div class="msg-meta"><span class="msg-tag assistant">🤖 Agent</span><span class="msg-time">02:00:08</span></div>
+            <div class="msg-bubble assistant">明白，先搞Antfarm让agent 7×24跑起来。让我先查下这个项目。</div>
+            <div class="tool-call">🔧 <span class="tool-name">web_search</span><span class="tool-params">query: "Antfarm OpenClaw agent 7x24"</span></div>
+          </div>
+          <div class="msg assistant">
+            <div class="msg-meta"><span class="msg-tag assistant">🤖 Agent</span><span class="msg-time">02:00:15</span></div>
+            <div class="msg-bubble assistant">找到了！Antfarm 是 OpenClaw 生态的多Agent团队框架，一键部署 planner/developer/verifier/tester/reviewer 等专业agent。
+
+让我先仔细研读README再动手。</div>
+            <div class="tool-call">🔧 <span class="tool-name">web_fetch</span><span class="tool-params">url: "https://github.com/snarktank/antfarm"</span></div>
+          </div>
+          <div class="msg assistant">
+            <div class="msg-meta"><span class="msg-tag assistant">🤖 Agent</span><span class="msg-time">02:01:30</span></div>
+            <div class="msg-bubble assistant">安装成功！Dashboard已启动在3333端口。</div>
+            <div class="tool-call">🔧 <span class="tool-name">exec</span><span class="tool-params">command: "antfarm workflow list"</span></div>
+          </div>
+          <div class="msg user">
+            <div class="msg-meta"><span class="msg-time">02:05:12</span><span class="msg-tag user">👤 User</span></div>
+            <div class="msg-bubble user">开发一个Agent Control Panel，PM先写PRD</div>
+          </div>
+          <div class="msg assistant">
+            <div class="msg-meta"><span class="msg-tag assistant">🤖 Agent</span><span class="msg-time">02:05:15</span></div>
+            <div class="msg-bubble assistant">好，走完整流程。先让PM写PRD，同时补完UX的AGENTS.md。</div>
+            <div class="tool-call">🔧 <span class="tool-name">sessions_send</span><span class="tool-params">sessionKey: "agent:pm:main", message: "## 任务：Agent Control Panel PRD..."</span></div>
+          </div>
+        </div>
+      </div>
+      <!-- 右侧边栏 -->
+      <div class="sidebar-panel">
+        <div class="sidebar-card">
+          <div class="sidebar-card-title">基本信息</div>
+          <div class="info-row"><span class="info-label">ID</span><span class="code">main</span></div>
+          <div class="info-row"><span class="info-label">模型</span><span>Opus 4.6</span></div>
+          <div class="info-row"><span class="info-label">角色</span><span>COO，调度中心</span></div>
+          <div class="info-row"><span class="info-label">状态</span><span style="color:#1677ff">● 工作中</span></div>
+        </div>
+        <div class="sidebar-card">
+          <div class="sidebar-card-title">Session 统计</div>
+          <div class="stat-grid">
+            <div><div class="mini-stat-title">Token 用量</div><div class="mini-stat-value">124,832</div></div>
+            <div><div class="mini-stat-title">消息数</div><div class="mini-stat-value">47</div></div>
+            <div><div class="mini-stat-title">运行时长</div><div class="mini-stat-value" style="grid-column:span 2">3h 24m</div></div>
+          </div>
+        </div>
+        <div class="sidebar-card">
+          <div class="sidebar-card-title">定时任务</div>
+          <div class="info-row"><span>📅 每日情报</span><span style="color:#52c41a;font-size:12px">● 启用</span></div>
+          <div style="font-size:12px;color:#ffffff73;padding:2px 0">每天 09:00 CST</div>
+          <div class="info-row" style="margin-top:8px"><span>💓 心跳检查</span><span style="color:#52c41a;font-size:12px">● 启用</span></div>
+          <div style="font-size:12px;color:#ffffff73;padding:2px 0">每60分钟</div>
+        </div>
+        <div class="sidebar-card">
+          <div class="sidebar-card-title">发送消息</div>
+          <div class="send-area">
+            <textarea rows="3" placeholder="输入消息发送给 Agent..."></textarea>
+            <button class="send-btn">📤 发送</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PAGE 3: Login ============ -->
+<div id="page-login" class="page">
+  <div class="login-wrapper">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="icon">🤖</div>
+        <h2>Agent Control Panel</h2>
+        <p>BitFantasy AI 团队管理平台</p>
+      </div>
+      <input type="password" class="login-input" placeholder="🔒 输入管理密码">
+      <button class="login-btn">🚀 登录</button>
+      <div class="login-footer">v1 · 单管理员模式</div>
+    </div>
+  </div>
+</div>
+
+<!-- Tab 切换 -->
+<div class="preview-tabs">
+  <button class="active" onclick="showPage('dashboard')">Dashboard</button>
+  <button onclick="showPage('detail')">Agent 详情</button>
+  <button onclick="showPage('login')">登录页</button>
+</div>
+
+<script>
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('.preview-tabs button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

@@ -170,3 +170,20 @@ export interface Document {
   created_at: string;
   updated_at: string;
 }
+
+// SRM Status Types
+export type SupplierStatus = 'potential' | 'approved' | 'active' | 'suspended' | 'blacklisted';
+export type SupplierCategory = 'manufacturer' | 'distributor' | 'service' | 'raw_material';
+export type PRStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'cancelled';
+export type PRPriority = 'low' | 'medium' | 'high' | 'urgent';
+export type POStatus = 'draft' | 'submitted' | 'approved' | 'shipped' | 'received' | 'completed' | 'cancelled';
+export type InspectionStatus = 'pending' | 'in_progress' | 'completed';
+export type InspectionResult = 'pending' | 'pass' | 'fail' | 'conditional';
+export type SettlementStatus = 'draft' | 'confirmed' | 'invoiced' | 'paid';
+export type CAStatus = 'open' | 'responded' | 'verified' | 'closed';
+export type CASeverity = 'low' | 'medium' | 'high' | 'critical';
+export type EvaluationStatus = 'draft' | 'submitted' | 'approved';
+export type EvaluationGrade = 'A' | 'B' | 'C' | 'D';
+
+// SRM entity interfaces are defined in @/api/srm.ts
+// Import them from there: import { Supplier, PurchaseOrder, ... } from '@/api/srm'

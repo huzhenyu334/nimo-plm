@@ -4,6 +4,14 @@
     "claude-tmux": {
       "version": "1.0.0",
       "installedAt": 1770916097720
+    },
+    "tavily-search": {
+      "version": "1.0.0",
+      "installedAt": 1771509061042
+    },
+    "clawdbot-sync": {
+      "version": "1.0.0",
+      "installedAt": 1771511187778
     }
   }
 }

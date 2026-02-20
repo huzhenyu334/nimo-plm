@@ -1,0 +1,22 @@
+{
+  "owner": "autogame-17",
+  "slug": "auto-pr-merger",
+  "displayName": "Auto Pr Merger",
+  "latest": {
+    "version": "1.0.0",
+    "publishedAt": 1771333487656,
+    "commit": "https://github.com/openclaw/skills/commit/0e7d86284948e5f5bb65163b8ef39f9a5248f4ca"
+  },
+  "history": [
+    {
+      "version": "1.0.2",
+      "publishedAt": 1770791134092,
+      "commit": "https://github.com/openclaw/skills/commit/94e389fcd36ff2567c51b31ffb9c9f15778febe2"
+    },
+    {
+      "version": "1.0.0",
+      "publishedAt": 1770118207296,
+      "commit": "https://github.com/clawdbot/skills/commit/9b28e1e1d1a153833fa4ad7d9baac86d55fc8fe7"
+    }
+  ]
+}
