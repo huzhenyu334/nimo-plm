@@ -79,29 +79,51 @@ exec command:"tmux load-buffer /tmp/cc-task.txt && tmux paste-buffer -t cc && sl
 exec command:"tmux send-keys -t cc 'simple english task here' Enter" timeout:3
 ```
 
-### 4. Verify Dispatch — Quick Confirm Then Leave
+### 4. Verify Dispatch — MUST Confirm CC is Working Before Sleeping
 
-After sending a task, do ONE quick check (3s delay) to confirm CC started processing:
-```bash
-exec command:"sleep 3 && tmux capture-pane -t cc -p | tail -5" timeout:10
-```
+**关键原则：Agent必须确认CC正常工作后才能结束turn。发完指令就睡是严重bug。**
 
-Look for signs CC is working: "Reading", "Searching", "Writing", thinking indicators.
-
-If CC is **still showing the input prompt with your text** (not processing):
-- Send an extra Enter: `tmux send-keys -t cc Enter`
-- Check once more
-
-If confirmed CC is working → tell user "已派发" → end turn → wait for hook.
-
-**Only poll CC output when:**
-- Hook notified you CC finished (to review results)
-- User explicitly asks "CC在干嘛" / "CC干完了吗"
-- Debugging a stuck/failed task
+发送任务后，进入**确认循环**（最多重试5次，每次间隔5-10秒）：
 
 ```bash
-exec command:"tmux capture-pane -t cc -p -J -S -50" timeout:5
+# 每次检查CC输出
+exec command:"sleep 5 && tmux capture-pane -t cc -p | tail -15" timeout:15
 ```
+
+**判断CC状态：**
+
+| CC输出特征 | 状态 | 行动 |
+|---|---|---|
+| "Reading", "Searching", "Writing", "Edit", thinking动画 | ✅ 正常工作 | 可以睡了，等hook |
+| 还在显示你发的输入文本，无响应 | ❌ 没提交 | `tmux send-keys -t cc Enter`，再检查 |
+| 空白/无输出/只有prompt符号 | ❌ CC可能没启动 | 检查进程 `pgrep -af claude`，必要时重启 |
+| 报错信息（auth error/rate limit/crash） | ❌ CC出错 | 解决问题（重试/Ctrl+C/重启）后重新派任务 |
+| "Would you like to..." 等交互提示 | ⚠️ 等待输入 | `tmux send-keys -t cc 'y' Enter` 或适当回应 |
+| context满/compact提示 | ⚠️ 需要清理 | `tmux send-keys -t cc '/compact' Enter`，等完成后重新派任务 |
+
+**确认循环伪代码：**
+```
+for i in 1..5:
+    sleep 5-10s
+    capture tmux output
+    if CC正在工作(Reading/Writing/thinking):
+        告诉用户"已确认CC在工作" → 结束turn → 等hook
+        return
+    elif CC没反应:
+        尝试修复（重发Enter/重启CC）
+    elif CC报错:
+        处理错误，重新派任务
+        
+# 5次都没确认CC在工作
+告诉用户"CC无法启动/响应，需要人工介入"
+```
+
+**绝对禁止：**
+- ❌ 发完tmux send-keys就直接告诉用户"已派发"然后结束turn
+- ❌ 只检查一次就放弃
+- ❌ 看到CC没反应但不处理就睡了
+
+**确认CC工作后才能说"已派发，等待CC完成后通知"。**
 
 ### 5. Session Persistence Rules
 
