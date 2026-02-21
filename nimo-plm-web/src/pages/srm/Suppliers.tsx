@@ -37,6 +37,7 @@ const categoryLabels: Record<string, string> = {
   electronic: '电子元器件',
   optical: '光学组件',
   packaging: '包装件',
+  manufacturer: '制造商',
   other: '其他',
 };
 
@@ -45,6 +46,7 @@ const categoryColors: Record<string, string> = {
   electronic: 'green',
   optical: 'purple',
   packaging: 'orange',
+  manufacturer: 'cyan',
   other: 'default',
 };
 
@@ -79,6 +81,7 @@ const statusOptions = [
 const statusMap: Record<string, { text: string; status: 'warning' | 'success' | 'error' | 'default' }> = {
   pending: { text: '待审核', status: 'warning' },
   active: { text: '已激活', status: 'success' },
+  approved: { text: '已认证', status: 'success' },
   suspended: { text: '已暂停', status: 'error' },
   blacklisted: { text: '已拉黑', status: 'default' },
 };
@@ -202,6 +205,29 @@ const Suppliers: React.FC = () => {
       refetchContacts();
     },
     onError: () => message.error('添加失败'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => srmApi.deleteSupplier(id),
+    onSuccess: () => {
+      message.success('供应商已删除');
+      setDrawerVisible(false);
+      setCurrentSupplier(null);
+      queryClient.invalidateQueries({ queryKey: ['srm-suppliers'] });
+    },
+    onError: () => message.error('删除失败'),
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) => srmApi.updateSupplier(id, { status }),
+    onSuccess: () => {
+      message.success('状态更新成功');
+      queryClient.invalidateQueries({ queryKey: ['srm-suppliers'] });
+      if (currentSupplier) {
+        queryClient.invalidateQueries({ queryKey: ['srm-supplier', currentSupplier.id] });
+      }
+    },
+    onError: () => message.error('状态更新失败'),
   });
 
   const deleteContactMutation = useMutation({
@@ -398,9 +424,27 @@ const Suppliers: React.FC = () => {
           open={drawerVisible}
           onClose={() => { setDrawerVisible(false); setCurrentSupplier(null); }}
           width="100%"
-          extra={detail && <Button type="primary" icon={<EditOutlined />} onClick={() => handleEdit(detail)}>编辑</Button>}
+          extra={detail && (
+            <Space>
+              <Button type="primary" icon={<EditOutlined />} onClick={() => handleEdit(detail)}>编辑</Button>
+              <Popconfirm title="确认删除该供应商？" onConfirm={() => deleteMutation.mutate(detail.id)}>
+                <Button danger icon={<DeleteOutlined />} loading={deleteMutation.isPending} />
+              </Popconfirm>
+            </Space>
+          )}
         >
           {detail && (
+            <>
+            <div style={{ marginBottom: 12 }}>
+              <span style={{ marginRight: 8 }}>状态：</span>
+              <Select
+                value={detail.status}
+                style={{ width: 110 }}
+                loading={statusMutation.isPending}
+                options={statusOptions}
+                onChange={(v) => statusMutation.mutate({ id: detail.id, status: v })}
+              />
+            </div>
             <Descriptions column={1} bordered size="small">
               <Descriptions.Item label="编码">{detail.code}</Descriptions.Item>
               <Descriptions.Item label="名称">{detail.name}</Descriptions.Item>
@@ -412,6 +456,7 @@ const Suppliers: React.FC = () => {
               <Descriptions.Item label="业务范围">{detail.business_scope || '-'}</Descriptions.Item>
               <Descriptions.Item label="付款条件">{detail.payment_terms || '-'}</Descriptions.Item>
             </Descriptions>
+            </>
           )}
         </Drawer>
       </div>
@@ -514,7 +559,21 @@ const Suppliers: React.FC = () => {
         open={drawerVisible}
         onClose={() => { setDrawerVisible(false); setCurrentSupplier(null); }}
         width={640}
-        extra={detail && <Button type="primary" icon={<EditOutlined />} onClick={() => handleEdit(detail)}>编辑</Button>}
+        extra={detail && (
+          <Space>
+            <Select
+              value={detail.status}
+              style={{ width: 110 }}
+              loading={statusMutation.isPending}
+              options={statusOptions}
+              onChange={(v) => statusMutation.mutate({ id: detail.id, status: v })}
+            />
+            <Button type="primary" icon={<EditOutlined />} onClick={() => handleEdit(detail)}>编辑</Button>
+            <Popconfirm title="确认删除该供应商？" onConfirm={() => deleteMutation.mutate(detail.id)}>
+              <Button danger icon={<DeleteOutlined />} loading={deleteMutation.isPending}>删除</Button>
+            </Popconfirm>
+          </Space>
+        )}
       >
         {detail && (
           <Tabs
