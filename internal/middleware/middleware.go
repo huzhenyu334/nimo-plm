@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -114,6 +115,18 @@ func JWTAuth(secret string) gin.HandlerFunc {
 				"message": "Authorization is required",
 			})
 			c.Abort()
+			return
+		}
+
+		// 优先检查API Token
+		if apiToken := os.Getenv("PLM_API_TOKEN"); apiToken != "" && tokenString == apiToken {
+			c.Set("user_id", "u_admin")
+			c.Set("user_name", "Agent")
+			c.Set("feishu_uid", "")
+			c.Set("is_admin", true)
+			c.Set("roles", []string{"plm_admin"})
+			c.Set("permissions", []string{"*"})
+			c.Next()
 			return
 		}
 
