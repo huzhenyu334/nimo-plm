@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Row, Col, Statistic, Table, Progress, Tag, Badge, App } from 'antd';
+import { Card, Row, Col, Statistic, Table, Progress, Badge } from 'antd';
 import {
   TeamOutlined,
   ShoppingCartOutlined,
@@ -22,8 +22,6 @@ const poStatusColors: Record<string, string> = {
 };
 
 export default function SupplierDashboard() {
-  const { message } = App.useApp();
-
   // Fetch suppliers
   const { data: supplierData, isLoading: loadingSuppliers } = useQuery({
     queryKey: ['supplier-dashboard-suppliers'],

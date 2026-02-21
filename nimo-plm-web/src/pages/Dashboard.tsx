@@ -1,11 +1,10 @@
 import React from 'react';
-import { Card, Row, Col, Statistic, Typography, List, Tag, Progress, Badge, Space, Button, Empty } from 'antd';
+import { Card, Row, Col, Statistic, Typography, List, Tag, Progress, Badge, Space, Button, Empty, Skeleton } from 'antd';
 import {
   ProjectOutlined,
   AuditOutlined,
   ClockCircleOutlined,
   CheckCircleOutlined,
-  BellOutlined,
   RightOutlined,
   ExperimentOutlined,
 } from '@ant-design/icons';
@@ -14,7 +13,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSSE } from '@/hooks/useSSE';
 import { projectApi, Project } from '@/api/projects';
+import { materialsApi } from '@/api/materials';
+import apiClient from '@/api/client';
 import dayjs from 'dayjs';
+import 'dayjs/locale/zh-cn';
+
+dayjs.locale('zh-cn');
 
 const { Title, Text } = Typography;
 
@@ -26,51 +30,16 @@ const phaseColors: Record<string, string> = {
   mp: 'green',
 };
 
-// Mock 待办数据（后端开发中，先用mock）
-const mockTodoItems = [
-  {
-    id: '1',
-    type: 'bom_review',
-    title: 'EVT 工程BOM v1.1 待审批',
-    project: 'nimo Air 2',
-    priority: 'high',
-    dueDate: '2026-02-08',
-    icon: <AuditOutlined style={{ color: '#faad14' }} />,
-  },
-  {
-    id: '2',
-    type: 'task_due',
-    title: '天线设计评审 即将到期',
-    project: 'nimo Air 2',
-    priority: 'medium',
-    dueDate: '2026-02-10',
-    icon: <ClockCircleOutlined style={{ color: '#1890ff' }} />,
-  },
-  {
-    id: '3',
-    type: 'gate_review',
-    title: 'G1 阶段门评审通知',
-    project: 'nimo Pro',
-    priority: 'high',
-    dueDate: '2026-02-12',
-    icon: <BellOutlined style={{ color: '#ff4d4f' }} />,
-  },
-  {
-    id: '4',
-    type: 'task_due',
-    title: 'BOM 成本核算 即将到期',
-    project: 'nimo Lite',
-    priority: 'low',
-    dueDate: '2026-02-15',
-    icon: <ClockCircleOutlined style={{ color: '#1890ff' }} />,
-  },
-];
-
 const priorityColors: Record<string, string> = {
   low: 'default',
   medium: 'blue',
   high: 'orange',
   urgent: 'red',
+};
+
+const taskTypeIcons: Record<string, React.ReactNode> = {
+  gate_review: <AuditOutlined style={{ color: '#faad14' }} />,
+  task: <ClockCircleOutlined style={{ color: '#1890ff' }} />,
 };
 
 const Dashboard: React.FC = () => {
@@ -82,6 +51,7 @@ const Dashboard: React.FC = () => {
   useSSE({
     onTaskUpdate: React.useCallback(() => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['my-tasks'] });
     }, [queryClient]),
     onProjectUpdate: React.useCallback(() => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
@@ -94,16 +64,33 @@ const Dashboard: React.FC = () => {
     queryFn: () => projectApi.list({ page_size: 50 }),
   });
 
+  // Fetch my tasks
+  const { data: tasksData, isLoading: tasksLoading } = useQuery({
+    queryKey: ['my-tasks'],
+    queryFn: async () => {
+      const res = await apiClient.get<{ data: { items: any[]; total: number } }>('/my/tasks', { params: { page_size: 10 } });
+      return res.data.data;
+    },
+  });
+
+  // Fetch materials count
+  const { data: materialsData } = useQuery({
+    queryKey: ['materials-count'],
+    queryFn: () => materialsApi.list(),
+  });
+
   const projects = projectsData?.items || [];
   const activeProjects = projects.filter(p => p.status === 'active');
   const completedProjects = projects.filter(p => p.status === 'completed');
+  const todoItems = tasksData?.items || [];
+  const materialsCount = materialsData?.materials?.length ?? '-';
 
   // Compute stats from real data
   const stats = {
     totalProjects: projects.length,
     activeProjects: activeProjects.length,
     completedProjects: completedProjects.length,
-    pendingTodos: mockTodoItems.length,
+    pendingTodos: tasksData?.total ?? 0,
   };
 
   return (
@@ -131,7 +118,7 @@ const Dashboard: React.FC = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card hoverable>
+          <Card hoverable onClick={() => navigate('/my-tasks')}>
             <Statistic
               title="我的待办"
               value={stats.pendingTodos}
@@ -153,9 +140,8 @@ const Dashboard: React.FC = () => {
           <Card hoverable onClick={() => navigate('/materials')}>
             <Statistic
               title="物料选型库"
-              value={'查看'}
+              value={materialsCount}
               prefix={<ExperimentOutlined style={{ color: '#722ed1' }} />}
-              valueStyle={{ fontSize: 16 }}
             />
           </Card>
         </Col>
@@ -170,35 +156,46 @@ const Dashboard: React.FC = () => {
               <Space>
                 <AuditOutlined />
                 <span>我的待办</span>
-                <Badge count={mockTodoItems.length} style={{ backgroundColor: '#faad14' }} />
+                <Badge count={stats.pendingTodos} style={{ backgroundColor: '#faad14' }} />
               </Space>
             }
-            extra={<Button type="link" size="small">查看全部</Button>}
+            extra={<Button type="link" size="small" onClick={() => navigate('/my-tasks')}>查看全部</Button>}
           >
-            <List
-              dataSource={mockTodoItems}
-              renderItem={(item) => (
-                <List.Item
-                  style={{ cursor: 'pointer', padding: '10px 0' }}
-                  actions={[
-                    <Tag color={priorityColors[item.priority]} key="priority">
-                      {item.priority === 'high' ? '高' : item.priority === 'medium' ? '中' : '低'}
-                    </Tag>,
-                  ]}
-                >
-                  <List.Item.Meta
-                    avatar={item.icon}
-                    title={item.title}
-                    description={
-                      <Space size={8}>
-                        <Tag style={{ fontSize: 11 }}>{item.project}</Tag>
-                        <Text type="secondary" style={{ fontSize: 12 }}>截止: {item.dueDate}</Text>
-                      </Space>
-                    }
-                  />
-                </List.Item>
-              )}
-            />
+            {tasksLoading ? (
+              <Skeleton active paragraph={{ rows: 4 }} />
+            ) : todoItems.length === 0 ? (
+              <Empty description="暂无待办" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <List
+                dataSource={todoItems}
+                renderItem={(item: any) => (
+                  <List.Item
+                    style={{ cursor: 'pointer', padding: '10px 0' }}
+                    onClick={() => navigate(`/projects/${item.project_id}`)}
+                    actions={[
+                      <Tag color={priorityColors[item.priority] || 'default'} key="priority">
+                        {item.priority === 'urgent' ? '紧急' : item.priority === 'high' ? '高' : item.priority === 'medium' ? '中' : '低'}
+                      </Tag>,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      avatar={taskTypeIcons[item.task_type] || <ClockCircleOutlined style={{ color: '#1890ff' }} />}
+                      title={item.title}
+                      description={
+                        <Space size={8}>
+                          {item.project?.name && <Tag style={{ fontSize: 11 }}>{item.project.name}</Tag>}
+                          {item.due_date && (
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              截止: {dayjs(item.due_date).format('YYYY-MM-DD')}
+                            </Text>
+                          )}
+                        </Space>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            )}
           </Card>
         </Col>
 
@@ -218,7 +215,7 @@ const Dashboard: React.FC = () => {
             }
           >
             {projectsLoading ? (
-              <div style={{ textAlign: 'center', padding: 40 }}>加载中...</div>
+              <Skeleton active paragraph={{ rows: 4 }} />
             ) : projects.length === 0 ? (
               <Empty description="暂无项目" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
