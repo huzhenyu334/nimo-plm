@@ -16,7 +16,7 @@ import {
   Tabs,
   Popconfirm,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, DeleteOutlined, SearchOutlined, RightOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, DeleteOutlined, SearchOutlined, RightOutlined, EditOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { srmApi, Supplier, SupplierContact } from '@/api/srm';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -83,6 +83,55 @@ const statusMap: Record<string, { text: string; status: 'warning' | 'success' | 
   blacklisted: { text: '已拉黑', status: 'default' },
 };
 
+// Shared form fields for create/edit
+const SupplierFormFields: React.FC<{ compact?: boolean }> = ({ compact }) => {
+  if (compact) {
+    return (
+      <>
+        <Form.Item name="name" label="供应商名称" rules={[{ required: true, message: '请输入供应商名称' }]}><Input placeholder="请输入供应商名称" /></Form.Item>
+        <Form.Item name="short_name" label="简称"><Input placeholder="请输入简称" /></Form.Item>
+        <Form.Item name="category" label="分类" rules={[{ required: true, message: '请选择分类' }]}><Select placeholder="请选择分类" options={categoryOptions} /></Form.Item>
+        <Form.Item name="level" label="等级"><Select placeholder="请选择等级" options={levelOptions} allowClear /></Form.Item>
+        <Form.Item name="city" label="城市"><Input placeholder="深圳" /></Form.Item>
+        <Form.Item name="business_scope" label="业务范围"><Input.TextArea rows={2} placeholder="主营业务描述" /></Form.Item>
+      </>
+    );
+  }
+  return (
+    <>
+      <Form.Item name="name" label="供应商名称" rules={[{ required: true, message: '请输入供应商名称' }]}>
+        <Input placeholder="请输入供应商名称" />
+      </Form.Item>
+      <Form.Item name="short_name" label="简称">
+        <Input placeholder="请输入简称" />
+      </Form.Item>
+      <Form.Item name="category" label="分类" rules={[{ required: true, message: '请选择分类' }]}>
+        <Select placeholder="请选择分类" options={categoryOptions} />
+      </Form.Item>
+      <Form.Item name="level" label="等级">
+        <Select placeholder="请选择等级" options={levelOptions} allowClear />
+      </Form.Item>
+      <Space style={{ width: '100%' }} size="middle">
+        <Form.Item name="country" label="国家" style={{ width: 180 }}>
+          <Input placeholder="中国" />
+        </Form.Item>
+        <Form.Item name="city" label="城市" style={{ width: 180 }}>
+          <Input placeholder="深圳" />
+        </Form.Item>
+      </Space>
+      <Form.Item name="address" label="地址">
+        <Input placeholder="详细地址" />
+      </Form.Item>
+      <Form.Item name="business_scope" label="业务范围">
+        <Input.TextArea rows={2} placeholder="主营业务描述" />
+      </Form.Item>
+      <Form.Item name="payment_terms" label="付款条件">
+        <Input placeholder="如: 月结30天" />
+      </Form.Item>
+    </>
+  );
+};
+
 const Suppliers: React.FC = () => {
   const isMobile = useIsMobile();
   const queryClient = useQueryClient();
@@ -95,6 +144,7 @@ const Suppliers: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [currentSupplier, setCurrentSupplier] = useState<Supplier | null>(null);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [contactForm] = Form.useForm();
   const [form] = Form.useForm();
 
@@ -127,11 +177,21 @@ const Suppliers: React.FC = () => {
     mutationFn: (values: Partial<Supplier>) => srmApi.createSupplier(values),
     onSuccess: () => {
       message.success('供应商创建成功');
-      setModalVisible(false);
-      form.resetFields();
+      closeModal();
       queryClient.invalidateQueries({ queryKey: ['srm-suppliers'] });
     },
     onError: () => message.error('创建失败'),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (values: Partial<Supplier>) => srmApi.updateSupplier(editingSupplier!.id, values),
+    onSuccess: () => {
+      message.success('供应商更新成功');
+      closeModal();
+      queryClient.invalidateQueries({ queryKey: ['srm-suppliers'] });
+      queryClient.invalidateQueries({ queryKey: ['srm-supplier', editingSupplier!.id] });
+    },
+    onError: () => message.error('更新失败'),
   });
 
   const createContactMutation = useMutation({
@@ -152,6 +212,29 @@ const Suppliers: React.FC = () => {
     },
     onError: () => message.error('删除失败'),
   });
+
+  const closeModal = () => {
+    setModalVisible(false);
+    setEditingSupplier(null);
+    form.resetFields();
+  };
+
+  const handleEdit = (supplier: Supplier) => {
+    setEditingSupplier(supplier);
+    form.setFieldsValue(supplier);
+    setDrawerVisible(false);
+    setModalVisible(true);
+  };
+
+  const handleModalOk = () => {
+    form.validateFields().then((values) => {
+      if (editingSupplier) {
+        updateMutation.mutate(values);
+      } else {
+        createMutation.mutate(values);
+      }
+    });
+  };
 
   const columns = [
     {
@@ -304,17 +387,19 @@ const Suppliers: React.FC = () => {
           <PlusOutlined />
         </div>
 
-        <Modal title="新建供应商" open={modalVisible} onOk={() => form.validateFields().then((values) => createMutation.mutate(values))} onCancel={() => { setModalVisible(false); form.resetFields(); }} confirmLoading={createMutation.isPending} width={600}>
+        <Modal title={editingSupplier ? '编辑供应商' : '新建供应商'} open={modalVisible} onOk={handleModalOk} onCancel={closeModal} confirmLoading={editingSupplier ? updateMutation.isPending : createMutation.isPending} width={600}>
           <Form form={form} layout="vertical">
-            <Form.Item name="name" label="供应商名称" rules={[{ required: true, message: '请输入供应商名称' }]}><Input placeholder="请输入供应商名称" /></Form.Item>
-            <Form.Item name="short_name" label="简称"><Input placeholder="请输入简称" /></Form.Item>
-            <Form.Item name="category" label="分类" rules={[{ required: true, message: '请选择分类' }]}><Select placeholder="请选择分类" options={categoryOptions} /></Form.Item>
-            <Form.Item name="city" label="城市"><Input placeholder="深圳" /></Form.Item>
-            <Form.Item name="business_scope" label="业务范围"><Input.TextArea rows={2} placeholder="主营业务描述" /></Form.Item>
+            <SupplierFormFields compact />
           </Form>
         </Modal>
 
-        <Drawer title={detail?.name || '供应商详情'} open={drawerVisible} onClose={() => { setDrawerVisible(false); setCurrentSupplier(null); }} width="100%">
+        <Drawer
+          title={detail?.name || '供应商详情'}
+          open={drawerVisible}
+          onClose={() => { setDrawerVisible(false); setCurrentSupplier(null); }}
+          width="100%"
+          extra={detail && <Button type="primary" icon={<EditOutlined />} onClick={() => handleEdit(detail)}>编辑</Button>}
+        >
           {detail && (
             <Descriptions column={1} bordered size="small">
               <Descriptions.Item label="编码">{detail.code}</Descriptions.Item>
@@ -409,42 +494,17 @@ const Suppliers: React.FC = () => {
         />
       </Card>
 
-      {/* 创建弹窗 */}
+      {/* 创建/编辑弹窗 */}
       <Modal
-        title="新建供应商"
+        title={editingSupplier ? '编辑供应商' : '新建供应商'}
         open={modalVisible}
-        onOk={() => form.validateFields().then((values) => createMutation.mutate(values))}
-        onCancel={() => { setModalVisible(false); form.resetFields(); }}
-        confirmLoading={createMutation.isPending}
+        onOk={handleModalOk}
+        onCancel={closeModal}
+        confirmLoading={editingSupplier ? updateMutation.isPending : createMutation.isPending}
         width={600}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="供应商名称" rules={[{ required: true, message: '请输入供应商名称' }]}>
-            <Input placeholder="请输入供应商名称" />
-          </Form.Item>
-          <Form.Item name="short_name" label="简称">
-            <Input placeholder="请输入简称" />
-          </Form.Item>
-          <Form.Item name="category" label="分类" rules={[{ required: true, message: '请选择分类' }]}>
-            <Select placeholder="请选择分类" options={categoryOptions} />
-          </Form.Item>
-          <Space style={{ width: '100%' }} size="middle">
-            <Form.Item name="country" label="国家" style={{ width: 180 }}>
-              <Input placeholder="中国" />
-            </Form.Item>
-            <Form.Item name="city" label="城市" style={{ width: 180 }}>
-              <Input placeholder="深圳" />
-            </Form.Item>
-          </Space>
-          <Form.Item name="address" label="地址">
-            <Input placeholder="详细地址" />
-          </Form.Item>
-          <Form.Item name="business_scope" label="业务范围">
-            <Input.TextArea rows={2} placeholder="主营业务描述" />
-          </Form.Item>
-          <Form.Item name="payment_terms" label="付款条件">
-            <Input placeholder="如: 月结30天" />
-          </Form.Item>
+          <SupplierFormFields />
         </Form>
       </Modal>
 
@@ -454,6 +514,7 @@ const Suppliers: React.FC = () => {
         open={drawerVisible}
         onClose={() => { setDrawerVisible(false); setCurrentSupplier(null); }}
         width={640}
+        extra={detail && <Button type="primary" icon={<EditOutlined />} onClick={() => handleEdit(detail)}>编辑</Button>}
       >
         {detail && (
           <Tabs
